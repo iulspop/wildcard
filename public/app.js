@@ -583,14 +583,26 @@ function unlockAudio() {
     audioOutput.attack.value = 0.003;
     audioOutput.release.value = 0.18;
     audioOutput.connect(audioContext.destination);
+
+    const silentGain = audioContext.createGain();
+    const silentSource = audioContext.createBufferSource();
+    silentGain.gain.value = 0;
+    silentSource.buffer = audioContext.createBuffer(1, 1, 22050);
+    silentSource.connect(silentGain).connect(audioOutput);
+    silentSource.start();
   }
-  if (audioContext.state === "suspended") audioContext.resume();
+  if (audioContext.state !== "running")
+    audioContext.resume().catch(() => undefined);
   return audioContext;
 }
-function playSound(type) {
+async function playSound(type) {
   if (soundVolume <= 0) return;
   const context = unlockAudio();
   if (!context) return;
+  if (context.state !== "running") {
+    await context.resume().catch(() => undefined);
+    if (context.state !== "running") return;
+  }
   const sounds = {
     start: [
       [523, 0, 0.18, 0.65, "sine"],
@@ -699,7 +711,17 @@ function updateVolumeControl() {
   $("#volume-value").textContent = percentage ? `${percentage}%` : "Muted";
 }
 updateVolumeControl();
-document.addEventListener("pointerdown", unlockAudio, { once: true });
+const activateAudio = () => unlockAudio();
+document.addEventListener("touchstart", activateAudio, {
+  passive: true,
+  once: true,
+});
+document.addEventListener("pointerdown", activateAudio, { once: true });
+document.addEventListener("click", activateAudio, { once: true });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") unlockAudio();
+});
+window.addEventListener("pageshow", activateAudio);
 bind("#volume", "input", (event) => {
   soundVolume = Number(event.currentTarget.value) / 100;
   localStorage.setItem("wildcard:volume", String(event.currentTarget.value));
