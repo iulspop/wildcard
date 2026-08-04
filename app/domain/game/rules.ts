@@ -9,7 +9,17 @@ export const DEFAULT_GAME_RULES: GameRules = Object.freeze({
   wild4Anytime: true,
   drawStacking: "same-type",
   drawEndsTurn: true,
+  unoEnabled: true,
+  unoCatchPenalty: 4,
+  unoGraceMs: 750,
 });
+
+export function normalizeRules(rules: GameRules): GameRules {
+  return {
+    ...DEFAULT_GAME_RULES,
+    ...rules,
+  };
+}
 
 export function validateRules(rules: GameRules): void {
   if (rules.version !== 1) throw new Error("Unsupported game rules version");
@@ -24,5 +34,11 @@ export function validateRules(rules: GameRules): void {
   }
   if (!Number.isInteger(rules.initialHandSize) || rules.initialHandSize < 1) {
     throw new Error("initialHandSize must be positive");
+  }
+  if (!Number.isInteger(rules.unoCatchPenalty) || rules.unoCatchPenalty < 1) {
+    throw new Error("unoCatchPenalty must be positive");
+  }
+  if (!Number.isInteger(rules.unoGraceMs) || rules.unoGraceMs < 0) {
+    throw new Error("unoGraceMs cannot be negative");
   }
 }

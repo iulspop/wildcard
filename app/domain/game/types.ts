@@ -22,6 +22,9 @@ export interface GameRules {
   wild4Anytime: boolean;
   drawStacking: "same-type" | "none";
   drawEndsTurn: boolean;
+  unoEnabled: boolean;
+  unoCatchPenalty: number;
+  unoGraceMs: number;
 }
 
 export interface PlayerSeed {
@@ -38,6 +41,13 @@ export interface PendingDraw {
   amount: number;
 }
 
+export interface UnoClaim {
+  id: string;
+  targetPlayerId: string;
+  openedAtSequence: number;
+  catchableAt: number;
+}
+
 export type GamePhase = "playing" | "finished";
 
 export interface GameState {
@@ -51,6 +61,9 @@ export interface GameState {
   direction: 1 | -1;
   activeColor: CardColor;
   pendingDraw: PendingDraw | null;
+  drawnCardId: string | null;
+  unoClaim: UnoClaim | null;
+  actionSequence: number;
   winnerId: string | null;
   turnNumber: number;
 }
@@ -71,12 +84,41 @@ export interface DrawCardsAction extends BaseAction {
   type: "draw";
 }
 
-export type GameAction = PlayCardsAction | DrawCardsAction;
+export interface PassDrawnCardAction extends BaseAction {
+  type: "pass";
+}
+
+export interface CallUnoAction extends BaseAction {
+  type: "call-uno";
+  claimId: string;
+}
+
+export interface CatchUnoAction extends BaseAction {
+  type: "catch-uno";
+  claimId: string;
+}
+
+export type GameAction =
+  | PlayCardsAction
+  | DrawCardsAction
+  | PassDrawnCardAction
+  | CallUnoAction
+  | CatchUnoAction;
 
 export type GameEvent =
   | { type: "cards-played"; playerId: string; cardIds: string[] }
   | { type: "cards-drawn"; playerId: string; count: number; penalty: boolean }
   | { type: "turn-changed"; playerId: string; turnNumber: number }
+  | { type: "uno-opened"; claim: UnoClaim }
+  | { type: "uno-called"; playerId: string; claimId: string }
+  | { type: "uno-expired"; playerId: string; claimId: string }
+  | {
+      type: "uno-caught";
+      playerId: string;
+      targetPlayerId: string;
+      claimId: string;
+      penalty: number;
+    }
   | { type: "game-won"; playerId: string };
 
 export interface TransitionResult {
@@ -96,7 +138,12 @@ export class GameRuleError extends Error {
       | "illegal-play"
       | "color-required"
       | "color-not-allowed"
-      | "empty-draw-pile",
+      | "empty-draw-pile"
+      | "uno-disabled"
+      | "uno-stale"
+      | "uno-too-early"
+      | "uno-self-catch"
+      | "uno-not-target",
     message: string,
   ) {
     super(message);

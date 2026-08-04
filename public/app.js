@@ -61,10 +61,16 @@ let sessionUser = null,
   socket = null,
   selected = new Set(),
   chosenColor = null,
-  soundEnabled = localStorage.getItem("wildcard:sound") !== "off",
+  soundVolume = Math.min(
+    1,
+    Math.max(0, Number(localStorage.getItem("wildcard:volume") ?? 50) / 100),
+  ),
   audioContext = null,
   previousTurn = null,
   previousWinner = null,
+  previousUnoClaimId = null,
+  pendingUnoClaimId = null,
+  unoTimer = null,
   messageTimer = null,
   roomInviteCredential = roomId ? inviteFromHash() : undefined;
 function message(text, error = false, persistent = false) {
@@ -226,7 +232,22 @@ function connect() {
   socket.onopen = () => {
     $("#connection").textContent = "Connected";
   };
-  socket.onclose = () => {
+  socket.onclose = (event) => {
+    if (event.code === 4001) {
+      const displayName = state?.seats.find(
+        (seat) => seat.playerId === credentials?.playerId,
+      )?.displayName;
+      localStorage.removeItem(`wildcard:${roomId}`);
+      credentials = null;
+      state = null;
+      socket = null;
+      $("#room-panel").classList.add("hidden");
+      $("#join-panel").classList.remove("hidden");
+      if (displayName)
+        $("#join-form input[name='displayName']").value = displayName;
+      message("The room host removed you. You may join again.", true, true);
+      return;
+    }
     $("#connection").textContent = "Reconnecting…";
     setTimeout(connect, 1500);
   };
@@ -259,15 +280,29 @@ function cardGroup(card) {
 }
 function render() {
   if (!state) return;
+  const mySeat = state.seats.find(
+      (seat) => seat.playerId === credentials?.playerId,
+    ),
+    isHost = mySeat?.seatIndex === 0;
   $("#seats").innerHTML = state.seats
     .map(
-      (s) =>
-        `<li class="seat"><span><span class="dot ${s.connected ? "online" : ""}"></span>${escapeHTML(s.displayName)}</span><span>${s.playerId === credentials?.playerId ? "You" : `Seat ${s.seatIndex + 1}`}</span></li>`,
+      (seat) =>
+        `<li class="seat"><span><span class="dot ${seat.connected ? "online" : ""}"></span>${escapeHTML(seat.displayName)}</span><span class="seat-actions">${seat.playerId === credentials?.playerId ? "You" : `Seat ${seat.seatIndex + 1}${isHost && !state.game ? ` <button class="kick-button" type="button" data-player-id="${escapeHTML(seat.playerId)}" aria-label="Remove ${escapeHTML(seat.displayName)} from room">Remove</button>` : ""}`}</span></li>`,
     )
     .join("");
-  $("#start").disabled = state.seats.length < 2 || !!state.game;
+  $("#start").disabled = !isHost || state.seats.length < 2 || !!state.game;
+  $("#end-game").classList.toggle(
+    "hidden",
+    !isHost || state.game?.phase !== "playing",
+  );
   $("#lobby").classList.toggle("hidden", !!state.game);
   $("#game").classList.toggle("hidden", !state.game);
+  if (!state.game) {
+    selected.clear();
+    chosenColor = null;
+    previousTurn = null;
+    previousWinner = null;
+  }
   const standings = state.standings || [];
   $("#standings-panel").classList.toggle("hidden", !standings.length);
   $("#standings").innerHTML = standings
@@ -278,6 +313,53 @@ function render() {
     .join("");
   if (state.game) renderGame(state.game);
 }
+function renderUno(game) {
+  const claim = game.unoClaim,
+    container = $("#uno-actions"),
+    callButton = $("#uno-call"),
+    catchButton = $("#uno-catch");
+  clearTimeout(unoTimer);
+  if (!claim) {
+    container.classList.add("hidden");
+    callButton.classList.add("hidden");
+    catchButton.classList.add("hidden");
+    previousUnoClaimId = null;
+    pendingUnoClaimId = null;
+    return;
+  }
+
+  const target = game.players.find(
+      (player) => player.id === claim.targetPlayerId,
+    ),
+    isTarget = claim.targetPlayerId === credentials.playerId,
+    catchable = Date.now() >= claim.catchableAt;
+  if (previousUnoClaimId !== claim.id) {
+    previousUnoClaimId = claim.id;
+    pendingUnoClaimId = null;
+    message(
+      isTarget
+        ? "You have one card — call UNO!"
+        : `${target?.name || "A player"} has one card.`,
+    );
+  }
+  container.classList.remove("hidden");
+  $("#uno-status").textContent = isTarget
+    ? "You have one card. Declare UNO before you are caught."
+    : catchable
+      ? `${target?.name || "This player"} can be caught now.`
+      : `${target?.name || "This player"} has a moment to call UNO.`;
+  callButton.classList.toggle("hidden", !isTarget);
+  catchButton.classList.toggle("hidden", isTarget);
+  callButton.disabled = pendingUnoClaimId === claim.id;
+  catchButton.disabled = !catchable || pendingUnoClaimId === claim.id;
+  if (!isTarget && !catchable) {
+    unoTimer = setTimeout(
+      () => state?.game && renderUno(state.game),
+      Math.max(0, claim.catchableAt - Date.now()) + 10,
+    );
+  }
+}
+
 function renderGame(game) {
   const me = game.players.find((p) => p.id === credentials.playerId),
     current = game.players.find((p) => p.id === game.currentPlayerId),
@@ -295,7 +377,7 @@ function renderGame(game) {
   $("#turn").textContent = winner
     ? `${winner.name} wins!`
     : current?.id === credentials.playerId
-      ? "Your turn"
+      ? "YOUR TURN — PLAY NOW"
       : `${current?.name}'s turn`;
   $("#direction").textContent =
     game.direction === 1 ? "Clockwise ↻" : "Counter-clockwise ↺";
@@ -305,6 +387,7 @@ function renderGame(game) {
   const activeColor = $("#active-color");
   activeColor.className = `active-color ${game.activeColor}`;
   activeColor.innerHTML = `<span class="active-color-swatch" aria-hidden="true"></span>Current color: ${escapeHTML(game.activeColor)}`;
+  renderUno(game);
   $("#opponents").innerHTML = game.players
     .filter((p) => p.id !== credentials.playerId)
     .map((p) => {
@@ -333,6 +416,7 @@ function renderGame(game) {
     isMyTurn = game.currentPlayerId === credentials.playerId,
     playableCardIds = new Set(game.playableCardIds || []),
     cardsById = new Map(hand.map((card) => [card.id, card]));
+  $("#game").classList.toggle("my-turn", isMyTurn);
   for (const cardId of selected) {
     if (!cardsById.has(cardId)) selected.delete(cardId);
   }
@@ -375,11 +459,20 @@ function renderGame(game) {
     button.classList.toggle("selected", isSelected);
     button.setAttribute("aria-pressed", String(isSelected));
   });
+  const gameFinished = game.phase === "finished";
+  const isHost = state.seats[0]?.playerId === credentials.playerId;
+  const decidingDraw = isMyTurn && game.drawnCardId !== null;
+  $("#play").classList.toggle("hidden", gameFinished);
+  $("#keep-drawn").classList.toggle("hidden", gameFinished || !decidingDraw);
   $("#play").disabled =
     !selected.size ||
     game.currentPlayerId !== credentials.playerId ||
     (hasSelectedWild && !chosenColor);
-  $("#draw").disabled = game.currentPlayerId !== credentials.playerId;
+  $("#draw").disabled =
+    gameFinished ||
+    game.currentPlayerId !== credentials.playerId ||
+    decidingDraw;
+  $("#post-game-actions").classList.toggle("hidden", !gameFinished || !isHost);
 }
 function send(type, payload = {}) {
   if (socket?.readyState !== WebSocket.OPEN) throw new Error("Not connected");
@@ -389,6 +482,20 @@ async function start() {
   unlockAudio();
   send("start");
   playSound("start");
+}
+async function returnToLobby() {
+  send("lobby");
+}
+function kickPlayer(playerId) {
+  send("kick", { targetPlayerId: playerId });
+}
+function endGame() {
+  if (
+    window.confirm(
+      "End this game and return everyone to the lobby? No result will be recorded.",
+    )
+  )
+    send("end-game");
 }
 async function play() {
   unlockAudio();
@@ -418,6 +525,31 @@ async function draw() {
   });
   playSound("draw");
 }
+async function keepDrawnCard() {
+  send("action", {
+    action: {
+      protocolVersion: 1,
+      actionId: crypto.randomUUID(),
+      playerId: credentials.playerId,
+      type: "pass",
+    },
+  });
+}
+function sendUno(type) {
+  const claimId = state?.game?.unoClaim?.id;
+  if (!claimId || pendingUnoClaimId === claimId) return;
+  pendingUnoClaimId = claimId;
+  renderUno(state.game);
+  send("action", {
+    action: {
+      protocolVersion: 1,
+      actionId: crypto.randomUUID(),
+      playerId: credentials.playerId,
+      type,
+      claimId,
+    },
+  });
+}
 function unlockAudio() {
   if (!window.AudioContext) return null;
   audioContext ||= new window.AudioContext();
@@ -425,7 +557,7 @@ function unlockAudio() {
   return audioContext;
 }
 function playSound(type) {
-  if (!soundEnabled) return;
+  if (soundVolume <= 0) return;
   const context = unlockAudio();
   if (!context) return;
   const sounds = {
@@ -449,7 +581,10 @@ function playSound(type) {
         startAt + duration,
       );
     gain.gain.setValueAtTime(0.0001, startAt);
-    gain.gain.exponentialRampToValueAtTime(0.08, startAt + 0.015);
+    gain.gain.exponentialRampToValueAtTime(
+      Math.max(0.0001, soundVolume * 0.5),
+      startAt + 0.015,
+    );
     gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
     oscillator.connect(gain).connect(context.destination);
     oscillator.start(startAt);
@@ -478,20 +613,37 @@ bind("#logout", "click", async () => {
   message("Signed out.");
 });
 bind("#start", "click", start);
+bind("#restart", "click", start);
+bind("#return-lobby", "click", returnToLobby);
+bind("#end-game", "click", endGame);
+bind("#seats", "click", (event) => {
+  const button = event.target.closest(".kick-button");
+  if (
+    button &&
+    window.confirm(
+      "Remove this player from the room? They may join again later.",
+    )
+  )
+    kickPlayer(button.dataset.playerId);
+});
 bind("#play", "click", play);
 bind("#draw", "click", draw);
-function updateSoundButton() {
-  $("#mute").textContent = soundEnabled ? "Sound on" : "Sound off";
-  $("#mute").setAttribute("aria-pressed", String(soundEnabled));
+bind("#keep-drawn", "click", keepDrawnCard);
+bind("#uno-call", "click", () => sendUno("call-uno"));
+bind("#uno-catch", "click", () => sendUno("catch-uno"));
+function updateVolumeControl() {
+  const percentage = Math.round(soundVolume * 100);
+  $("#volume").value = String(percentage);
+  $("#volume-value").textContent = percentage ? `${percentage}%` : "Muted";
 }
-updateSoundButton();
+updateVolumeControl();
 document.addEventListener("pointerdown", unlockAudio, { once: true });
-bind("#mute", "click", () => {
-  soundEnabled = !soundEnabled;
-  localStorage.setItem("wildcard:sound", soundEnabled ? "on" : "off");
-  updateSoundButton();
-  if (soundEnabled) playSound("turn");
+bind("#volume", "input", (event) => {
+  soundVolume = Number(event.currentTarget.value) / 100;
+  localStorage.setItem("wildcard:volume", String(event.currentTarget.value));
+  updateVolumeControl();
 });
+bind("#volume", "change", () => playSound("turn"));
 bind("#copy", "click", async () => {
   await navigator.clipboard.writeText($("#invite-url").value);
   message("Invite link copied.");

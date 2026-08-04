@@ -12,6 +12,9 @@ import {
 
 type ActionInput =
   | { type: "draw" }
+  | { type: "pass" }
+  | { type: "call-uno"; claimId: string }
+  | { type: "catch-uno"; claimId: string }
   | {
       type: "play";
       cardIds: string[];
@@ -210,6 +213,46 @@ describe("actions and turn order", () => {
   });
 });
 
+describe("drawing a playable card", () => {
+  it("lets the player play only the card they just drew", () => {
+    const drawn = card("blue", "number", 5);
+    const state = makeTestState({ drawPile: [drawn] });
+
+    const afterDraw = applyAction(state, action("p1", { type: "draw" }), {
+      shuffle: identityShuffle,
+    }).state;
+
+    expect(afterDraw.currentPlayerIndex).toBe(0);
+    expect(afterDraw.drawnCardId).toBe(drawn.id);
+    expect(canPlayCard(afterDraw, drawn)).toBe(true);
+    expect(canPlayCard(afterDraw, afterDraw.players[0]!.hand[0]!)).toBe(false);
+
+    const afterPlay = applyAction(
+      afterDraw,
+      action("p1", { type: "play", cardIds: [drawn.id] }),
+    ).state;
+    expect(afterPlay.currentPlayerIndex).toBe(1);
+    expect(afterPlay.drawnCardId).toBeNull();
+  });
+
+  it("lets the player keep a playable drawn card and end their turn", () => {
+    const drawn = card("blue", "number", 5);
+    const afterDraw = applyAction(
+      makeTestState({ drawPile: [drawn] }),
+      action("p1", { type: "draw" }),
+      { shuffle: identityShuffle },
+    ).state;
+
+    const afterPass = applyAction(
+      afterDraw,
+      action("p1", { type: "pass" }),
+    ).state;
+    expect(afterPass.currentPlayerIndex).toBe(1);
+    expect(afterPass.drawnCardId).toBeNull();
+    expect(afterPass.players[0]!.hand).toContainEqual(drawn);
+  });
+});
+
 describe("draw stacking", () => {
   it("accumulates grouped draw cards and only permits the same type to pass the penalty", () => {
     const drawTwos = [card("red", "draw2"), card("blue", "draw2")];
@@ -304,5 +347,150 @@ describe("invalid actions", () => {
       applyAction(state, action("p1", { type: "draw" })).state
         .currentPlayerIndex,
     ).toBe(0);
+  });
+});
+
+describe("UNO claims", () => {
+  function openClaim(now = 1_000) {
+    const played = card("red", "number", 7);
+    const remaining = card("blue", "number", 2);
+    const state = makeTestState({
+      players: [
+        { id: "p1", name: "One", hand: [played, remaining] },
+        {
+          id: "p2",
+          name: "Two",
+          hand: [card("yellow", "number", 3), card("green", "number", 4)],
+        },
+      ],
+    });
+    const result = applyAction(
+      state,
+      action("p1", { type: "play", cardIds: [played.id] }),
+      { now, generateClaimId: () => "claim-1" },
+    );
+    return { state: result.state, remaining };
+  }
+
+  it("opens a deterministic claim when a play leaves one card", () => {
+    const { state } = openClaim();
+    expect(state.actionSequence).toBe(1);
+    expect(state.unoClaim).toEqual({
+      id: "claim-1",
+      targetPlayerId: "p1",
+      openedAtSequence: 1,
+      catchableAt: 1_750,
+    });
+  });
+
+  it("does not leave a claim when the player wins", () => {
+    const last = card("red", "number", 7);
+    const state = makeTestState({
+      players: [
+        { id: "p1", name: "One", hand: [last] },
+        { id: "p2", name: "Two", hand: [card("blue", "number", 2)] },
+      ],
+    });
+    const result = applyAction(
+      state,
+      action("p1", { type: "play", cardIds: [last.id] }),
+      { now: 1_000, generateClaimId: () => "unused" },
+    );
+    expect(result.state.phase).toBe("finished");
+    expect(result.state.unoClaim).toBeNull();
+  });
+
+  it("allows the target to call during grace and rejects other callers", () => {
+    const { state } = openClaim();
+    expect(() =>
+      applyAction(
+        state,
+        action("p2", { type: "call-uno", claimId: "claim-1" }),
+        { now: 1_100 },
+      ),
+    ).toThrowError(expect.objectContaining({ code: "uno-not-target" }));
+    const called = applyAction(
+      state,
+      action("p1", { type: "call-uno", claimId: "claim-1" }),
+      { now: 1_100 },
+    );
+    expect(called.state.unoClaim).toBeNull();
+    expect(called.events).toContainEqual({
+      type: "uno-called",
+      playerId: "p1",
+      claimId: "claim-1",
+    });
+  });
+
+  it("rejects early, self, and stale catches without mutating the claim", () => {
+    const { state } = openClaim();
+    for (const [playerId, claimId, now, code] of [
+      ["p2", "claim-1", 1_749, "uno-too-early"],
+      ["p1", "claim-1", 1_800, "uno-self-catch"],
+      ["p2", "old-claim", 1_800, "uno-stale"],
+    ] as const) {
+      expect(() =>
+        applyAction(state, action(playerId, { type: "catch-uno", claimId }), {
+          now,
+        }),
+      ).toThrowError(expect.objectContaining({ code }));
+      expect(state.unoClaim?.id).toBe("claim-1");
+      expect(state.players[0]!.hand).toHaveLength(1);
+    }
+  });
+
+  it("applies exactly four cards after grace without changing the turn", () => {
+    const { state } = openClaim();
+    const beforeTurn = state.currentPlayerIndex;
+    const caught = applyAction(
+      state,
+      action("p2", { type: "catch-uno", claimId: "claim-1" }),
+      { now: 1_750, shuffle: identityShuffle },
+    );
+    expect(caught.state.players[0]!.hand).toHaveLength(5);
+    expect(caught.state.currentPlayerIndex).toBe(beforeTurn);
+    expect(caught.state.pendingDraw).toBe(state.pendingDraw);
+    expect(caught.state.unoClaim).toBeNull();
+  });
+
+  it("expires an unanswered claim on accepted gameplay but not rejected gameplay", () => {
+    const { state } = openClaim();
+    expect(() =>
+      applyAction(state, action("p1", { type: "draw" }), { now: 2_000 }),
+    ).toThrowError(expect.objectContaining({ code: "not-your-turn" }));
+    expect(state.unoClaim?.id).toBe("claim-1");
+
+    const advanced = applyAction(state, action("p2", { type: "draw" }), {
+      now: 2_000,
+      shuffle: identityShuffle,
+    });
+    expect(advanced.state.unoClaim).toBeNull();
+    expect(advanced.events).toContainEqual({
+      type: "uno-expired",
+      playerId: "p1",
+      claimId: "claim-1",
+    });
+  });
+
+  it("opens a claim after a grouped play leaves exactly one card", () => {
+    const first = card("red", "number", 7);
+    const second = card("blue", "number", 7);
+    const remaining = card("green", "number", 1);
+    const state = makeTestState({
+      players: [
+        { id: "p1", name: "One", hand: [first, second, remaining] },
+        { id: "p2", name: "Two", hand: [card("yellow", "number", 4)] },
+      ],
+    });
+    const result = applyAction(
+      state,
+      action("p1", {
+        type: "play",
+        cardIds: [first.id, second.id],
+      }),
+      { now: 5_000, generateClaimId: () => "group-claim" },
+    );
+    expect(result.state.players[0]!.hand).toEqual([remaining]);
+    expect(result.state.unoClaim?.id).toBe("group-claim");
   });
 });

@@ -1,5 +1,6 @@
 import { randomShuffle } from "../domain/game/deck.ts";
 import { applyAction, createGame } from "../domain/game/engine.ts";
+import { normalizeRules } from "../domain/game/rules.ts";
 import { GameRuleError, type GameState } from "../domain/game/types.ts";
 import { projectGame } from "../domain/game/view.ts";
 import type { WorkerEnv } from "../services/env.server.ts";
@@ -32,13 +33,17 @@ type SeatRow = {
 type SocketAttachment = {
   playerId: string;
   reconnectHash: string;
-  windowStartedAt: number;
-  messageCount: number;
+  windowStartedAt?: number;
+  messageCount?: number;
+  unoWindowStartedAt?: number;
+  unoMessageCount?: number;
 };
 
 const MAX_SOCKET_MESSAGE_BYTES = 16_384;
 const RATE_WINDOW_MS = 10_000;
 const MAX_MESSAGES_PER_WINDOW = 20;
+const UNO_RATE_WINDOW_MS = 1_000;
+const MAX_UNO_MESSAGES_PER_WINDOW = 3;
 const DEFAULT_TEMPORARY_ROOM_TTL_MS = 60 * 60 * 1000;
 
 export class GameRoom implements DurableObject {
@@ -130,6 +135,10 @@ export class GameRoom implements DurableObject {
 
       const now = Date.now();
       const attachment = socket.deserializeAttachment() as SocketAttachment;
+      attachment.windowStartedAt ??= now;
+      attachment.messageCount ??= 0;
+      attachment.unoWindowStartedAt ??= now;
+      attachment.unoMessageCount ??= 0;
       if (now - attachment.windowStartedAt >= RATE_WINDOW_MS) {
         attachment.windowStartedAt = now;
         attachment.messageCount = 0;
@@ -137,12 +146,30 @@ export class GameRoom implements DurableObject {
       attachment.messageCount += 1;
       if (attachment.messageCount > MAX_MESSAGES_PER_WINDOW)
         throw new RoomError("rate-limited", "Too many room actions", 429);
-      socket.serializeAttachment(attachment);
 
       const incoming = JSON.parse(message) as RoomCommand;
+      const isUnoCommand =
+        incoming.type === "action" &&
+        (incoming.action?.type === "call-uno" ||
+          incoming.action?.type === "catch-uno");
+      if (isUnoCommand) {
+        if (now - attachment.unoWindowStartedAt >= UNO_RATE_WINDOW_MS) {
+          attachment.unoWindowStartedAt = now;
+          attachment.unoMessageCount = 0;
+        }
+        attachment.unoMessageCount += 1;
+        if (attachment.unoMessageCount > MAX_UNO_MESSAGES_PER_WINDOW) {
+          socket.serializeAttachment(attachment);
+          throw new RoomError("uno-rate-limited", "Too many UNO attempts", 429);
+        }
+      }
+      socket.serializeAttachment(attachment);
       if (
         incoming.type !== "action" &&
         incoming.type !== "start" &&
+        incoming.type !== "lobby" &&
+        incoming.type !== "kick" &&
+        incoming.type !== "end-game" &&
         incoming.type !== "leave"
       )
         throw new RoomError(
@@ -237,6 +264,8 @@ export class GameRoom implements DurableObject {
       reconnectHash,
       windowStartedAt: Date.now(),
       messageCount: 0,
+      unoWindowStartedAt: Date.now(),
+      unoMessageCount: 0,
     } satisfies SocketAttachment);
     this.state.acceptWebSocket(server);
     this.state.storage.sql.exec(
@@ -312,6 +341,10 @@ export class GameRoom implements DurableObject {
     }
     if (command.type === "start")
       return this.start(stored, seat, command.rules);
+    if (command.type === "lobby") return this.returnToLobby(stored, seat);
+    if (command.type === "kick")
+      return this.kickPlayer(stored, seat, command.targetPlayerId);
+    if (command.type === "end-game") return this.endGame(stored, seat);
     if (command.type === "action")
       return this.action(stored, seat, command.action);
     throw new RoomError("invalid-command", "Unknown room command", 400);
@@ -435,6 +468,110 @@ export class GameRoom implements DurableObject {
     return this.publicState(stored, seat.playerId);
   }
 
+  private kickPlayer(
+    stored: StoredRoomState,
+    seat: StoredRoomState["seats"][number],
+    targetPlayerId: string,
+  ): RoomStateResponse {
+    if (seat.seatIndex !== 0)
+      throw new RoomError(
+        "not-owner",
+        "Only the room host can remove players",
+        403,
+      );
+    if (stored.game)
+      throw new RoomError(
+        "game-in-progress",
+        "Players can only be removed from the lobby",
+        409,
+      );
+    if (targetPlayerId === seat.playerId)
+      throw new RoomError(
+        "cannot-kick-owner",
+        "The room host cannot remove themselves",
+        409,
+      );
+    const target = stored.seats.find(
+      (candidate) => candidate.playerId === targetPlayerId,
+    );
+    if (!target)
+      throw new RoomError("player-not-found", "Player is not seated", 404);
+
+    this.state.storage.sql.exec(
+      "DELETE FROM seats WHERE player_id = ?",
+      targetPlayerId,
+    );
+    stored.seats = stored.seats.filter(
+      (candidate) => candidate.playerId !== targetPlayerId,
+    );
+    this.state.storage.sql.exec(
+      "UPDATE seats SET seat_index = seat_index + 100",
+    );
+    stored.seats.forEach((candidate, index) => {
+      candidate.seatIndex = index;
+      this.state.storage.sql.exec(
+        "UPDATE seats SET seat_index = ? WHERE player_id = ?",
+        index,
+        candidate.playerId,
+      );
+    });
+    for (const socket of this.state.getWebSockets()) {
+      const attachment = socket.deserializeAttachment() as SocketAttachment;
+      if (attachment.playerId === targetPlayerId)
+        socket.close(4001, "Removed from the room by the host");
+    }
+    this.bumpVersion(stored);
+    return this.publicState(stored, seat.playerId);
+  }
+
+  private endGame(
+    stored: StoredRoomState,
+    seat: StoredRoomState["seats"][number],
+  ): RoomStateResponse {
+    if (seat.seatIndex !== 0)
+      throw new RoomError(
+        "not-owner",
+        "Only the room host can end the game",
+        403,
+      );
+    if (!stored.game || stored.game.phase !== "playing")
+      throw new RoomError(
+        "no-active-game",
+        "There is no active game to end",
+        409,
+      );
+    stored.game = null;
+    this.state.storage.sql.exec(
+      "DELETE FROM game_snapshot WHERE singleton = 1",
+    );
+    this.bumpVersion(stored);
+    return this.publicState(stored, seat.playerId);
+  }
+
+  private returnToLobby(
+    stored: StoredRoomState,
+    seat: StoredRoomState["seats"][number],
+  ): RoomStateResponse {
+    if (seat.seatIndex !== 0)
+      throw new RoomError(
+        "not-owner",
+        "Only the room host can return to the lobby",
+        403,
+      );
+    if (!stored.game || stored.game.phase !== "finished")
+      throw new RoomError(
+        "game-not-finished",
+        "The game must be finished before returning to the lobby",
+        409,
+      );
+    stored.game = null;
+    this.state.storage.sql.exec(
+      "DELETE FROM game_snapshot WHERE singleton = 1",
+    );
+    this.bumpVersion(stored);
+    return this.publicState(stored, seat.playerId);
+  }
+
   private action(
     stored: StoredRoomState,
     seat: StoredRoomState["seats"][number],
@@ -457,6 +594,8 @@ export class GameRoom implements DurableObject {
     if (processed) return this.publicState(stored, seat.playerId);
     stored.game = applyAction(stored.game, action, {
       shuffle: randomShuffle(secureRandom),
+      now: Date.now(),
+      generateClaimId: () => crypto.randomUUID(),
     }).state;
     if (stored.game.phase === "finished" && stored.game.winnerId)
       this.recordCompletedMatch(stored, action.actionId, stored.game.winnerId);
@@ -493,10 +632,30 @@ export class GameRoom implements DurableObject {
         "SELECT state_json FROM game_snapshot WHERE singleton = 1",
       )
       .toArray()[0];
+    const game = snapshot
+      ? (JSON.parse(snapshot.state_json) as GameState)
+      : null;
+    if (game) {
+      game.rules = normalizeRules(game.rules);
+      if (game.drawnCardId === undefined) game.drawnCardId = null;
+      if (game.unoClaim === undefined) game.unoClaim = null;
+      if (game.actionSequence === undefined) game.actionSequence = 0;
+      const unoTarget = game.unoClaim
+        ? game.players.find(
+            (player) => player.id === game.unoClaim?.targetPlayerId,
+          )
+        : null;
+      if (
+        game.phase !== "playing" ||
+        (game.unoClaim && (!unoTarget || unoTarget.hand.length !== 1))
+      ) {
+        game.unoClaim = null;
+      }
+    }
     return {
       room: mapMetadata(row),
       seats,
-      game: snapshot ? (JSON.parse(snapshot.state_json) as GameState) : null,
+      game,
     };
   }
 

@@ -10,51 +10,69 @@ export function HomePage() {
           <a className="brand" href="/">
             WILDCARD
           </a>
-          <details id="account-menu" className="account-menu">
-            <summary id="account-trigger">Sign in</summary>
-            <section
-              className="account-popover stack"
-              aria-labelledby="account-title"
-            >
-              <div className="account-heading">
-                <div>
-                  <span className="eyebrow">Account</span>
-                  <h2 id="account-title">Play across visits</h2>
+          <div className="topbar-actions">
+            <label className="volume-control" htmlFor="volume">
+              <span aria-hidden="true">Sound</span>
+              <input
+                id="volume"
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                defaultValue="50"
+                aria-label="Sound volume"
+              />
+              <output id="volume-value" htmlFor="volume">
+                50%
+              </output>
+            </label>
+            <details id="account-menu" className="account-menu">
+              <summary id="account-trigger">Sign in</summary>
+              <section
+                className="account-popover stack"
+                aria-labelledby="account-title"
+              >
+                <div className="account-heading">
+                  <div>
+                    <span className="eyebrow">Account</span>
+                    <h2 id="account-title">Play across visits</h2>
+                  </div>
+                  <span id="auth-name" className="hidden">
+                    Guest
+                  </span>
                 </div>
-                <span id="auth-name" className="hidden">
-                  Guest
-                </span>
-              </div>
-              <div id="auth-controls" className="stack">
-                <p>
-                  Optional. Use a passkey to keep rooms and all-time standings.
-                </p>
-                <label>
-                  Display name
-                  <input
-                    id="auth-display-name"
-                    maxLength={40}
-                    autoComplete="nickname"
-                  />
-                </label>
-                <div className="row">
-                  <button id="register" type="button">
-                    Create passkey
-                  </button>
-                  <button id="login" className="secondary" type="button">
-                    Sign in
-                  </button>
+                <div id="auth-controls" className="stack">
+                  <p>
+                    Optional. Use a passkey to keep rooms and all-time
+                    standings.
+                  </p>
+                  <label>
+                    Display name
+                    <input
+                      id="auth-display-name"
+                      maxLength={40}
+                      autoComplete="nickname"
+                    />
+                  </label>
+                  <div className="row">
+                    <button id="register" type="button">
+                      Create passkey
+                    </button>
+                    <button id="login" className="secondary" type="button">
+                      Sign in
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <button id="logout" className="secondary hidden" type="button">
-                Sign out
-              </button>
-              <div id="owned-rooms" className="hidden stack">
-                <h3>Your rooms</h3>
-                <ul id="owned-room-list" className="owned-room-list" />
-              </div>
-            </section>
-          </details>
+                <button id="logout" className="secondary hidden" type="button">
+                  Sign out
+                </button>
+                <div id="owned-rooms" className="hidden stack">
+                  <h3>Your rooms</h3>
+                  <ul id="owned-room-list" className="owned-room-list" />
+                </div>
+              </section>
+            </details>
+          </div>
         </header>
         <div
           id="status"
@@ -168,6 +186,27 @@ export function HomePage() {
                     <span id="active-color" className="active-color" />
                   </div>
                 </div>
+                <div
+                  id="uno-actions"
+                  className="uno-actions hidden"
+                  aria-live="polite"
+                >
+                  <span id="uno-status" />
+                  <button
+                    id="uno-call"
+                    className="uno-button hidden"
+                    type="button"
+                  >
+                    UNO!
+                  </button>
+                  <button
+                    id="uno-catch"
+                    className="uno-button catch hidden"
+                    type="button"
+                  >
+                    Catch UNO
+                  </button>
+                </div>
                 <div className="piles" aria-label="Draw and discard piles">
                   <div className="pile-wrap">
                     <span className="pile-label">Draw pile</span>
@@ -214,19 +253,32 @@ export function HomePage() {
                     <span className="eyebrow">Your hand</span>
                     <strong id="hand-count" />
                   </div>
-                  <button
-                    id="mute"
-                    className="icon-button"
-                    type="button"
-                    aria-pressed="true"
-                  >
-                    Sound on
-                  </button>
                 </div>
                 <div id="hand" className="hand" aria-label="Your hand" />
                 <button id="play" className="play-button" type="button">
                   Play selected cards
                 </button>
+                <button id="end-game" className="danger hidden" type="button">
+                  End game without results
+                </button>
+                <button
+                  id="keep-drawn"
+                  className="secondary hidden"
+                  type="button"
+                >
+                  Keep drawn card
+                </button>
+                <div
+                  id="post-game-actions"
+                  className="post-game-actions hidden"
+                >
+                  <button id="restart" type="button">
+                    Play again
+                  </button>
+                  <button id="return-lobby" className="secondary" type="button">
+                    Return to lobby
+                  </button>
+                </div>
               </div>
             </section>
           </div>

@@ -121,6 +121,37 @@ label {
   text-decoration: none;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.volume-control {
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.volume-control input {
+  width: clamp(76px, 12vw, 120px);
+  min-height: 24px;
+  padding: 0;
+  accent-color: var(--gold);
+  cursor: pointer;
+}
+
+.volume-control output {
+  width: 34px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .account-menu {
   position: relative;
   color: var(--muted);
@@ -315,11 +346,34 @@ label {
 
 .seat {
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 12px;
   background: #101216;
   border: 1px solid #292c31;
   border-radius: 12px;
   padding: 12px;
+}
+
+.seat-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.kick-button {
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 1px solid #7e3939;
+  background: transparent;
+  color: #ffabab;
+  font-size: 0.78rem;
+}
+
+.kick-button:hover {
+  background: #4c1f1f;
 }
 
 .dot {
@@ -489,6 +543,47 @@ label {
   font-size: 1.05rem;
   font-weight: 900;
   color: #fff;
+}
+
+.game-table.my-turn {
+  outline: 4px solid var(--gold);
+  outline-offset: 4px;
+  box-shadow:
+    0 0 0 8px #ffc92828,
+    0 0 48px #ffc92845;
+  animation: your-turn-pulse 1.15s ease-in-out infinite alternate;
+}
+
+.game-table.my-turn .turn-hud {
+  border-color: #fff0a8;
+  background: var(--gold);
+  box-shadow: 0 8px 30px #0007;
+}
+
+.game-table.my-turn .turn-primary,
+.game-table.my-turn .turn-meta {
+  color: #17120a;
+}
+
+@keyframes your-turn-pulse {
+  from {
+    outline-color: #ffc928;
+    box-shadow:
+      0 0 0 5px #ffc9281f,
+      0 0 26px #ffc92835;
+  }
+  to {
+    outline-color: #fff0a8;
+    box-shadow:
+      0 0 0 10px #ffc92835,
+      0 0 60px #ffc92860;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .game-table.my-turn {
+    animation: none;
+  }
 }
 
 .turn-meta {
@@ -770,6 +865,13 @@ button.card.selected {
   font-size: 0.78rem;
 }
 
+.post-game-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
 .hand {
   display: flex;
   overflow-x: auto;
@@ -959,4 +1061,54 @@ button.card.selected {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+.uno-actions {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: min(92%, 540px);
+  margin: 12px auto 0;
+  padding: 10px 12px;
+  border: 1px solid #f9cb4066;
+  border-radius: 16px;
+  background: #111317dd;
+  box-shadow: 0 10px 30px #0005;
+  text-align: center;
+}
+
+.uno-actions > span {
+  flex: 1;
+  color: #fff4c2;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.uno-button {
+  min-width: 104px;
+  padding: 0.7rem 1rem;
+  border-color: #fff3;
+  background: linear-gradient(135deg, #ef3340, #f9cb40);
+  color: #17120a;
+  font-weight: 1000;
+  letter-spacing: 0.06em;
+}
+
+.uno-button.catch {
+  background: linear-gradient(135deg, #f9cb40, #5cd65c);
+}
+
+@media (max-width: 560px) {
+  .uno-actions {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .uno-button {
+    width: 100%;
+  }
 }

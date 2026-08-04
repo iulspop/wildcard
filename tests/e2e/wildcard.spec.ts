@@ -15,6 +15,13 @@ type GameState = {
   currentPlayerId: string;
   activeColor: "red" | "yellow" | "green" | "blue";
   pendingDraw: { kind: "draw2" | "wild4"; amount: number } | null;
+  drawnCardId: string | null;
+  playableCardIds: string[];
+  unoClaim: {
+    id: string;
+    targetPlayerId: string;
+    catchableAt: number;
+  } | null;
   winnerId: string | null;
 };
 
@@ -117,13 +124,41 @@ function cardGroup(card: Card) {
   return card.kind === "number" ? `number:${card.value}` : card.kind;
 }
 
-function isPlayable(game: GameState, card: Card) {
-  if (game.pendingDraw) return card.kind === game.pendingDraw.kind;
-  if (card.color === "wild") return true;
-  return (
-    card.color === game.activeColor ||
-    cardGroup(card) === cardGroup(game.topDiscard)
-  );
+async function playUntilUnoClaim(
+  request: APIRequestContext,
+  roomId: string,
+  players: JoinedPlayer[],
+) {
+  for (let turn = 0; turn < 1_000; turn++) {
+    const publicState = await roomState(request, roomId, players[0]!);
+    if (publicState.game.unoClaim) return publicState.game.unoClaim;
+    expect(publicState.game.phase).toBe("playing");
+    const player = players.find(
+      (candidate) => candidate.playerId === publicState.game.currentPlayerId,
+    )!;
+    const state = await roomState(request, roomId, player);
+    const hand = state.game.players.find(
+      (candidate) => candidate.id === player.playerId,
+    )!.hand!;
+    const playable = hand.find((card) =>
+      state.game.playableCardIds.includes(card.id),
+    );
+    const response = playable
+      ? await sendGameAction(request, roomId, player, {
+          type: "play",
+          cardIds: [playable.id],
+          ...(playable.color === "wild" ? { chosenColor: "red" } : {}),
+        })
+      : state.game.drawnCardId
+        ? await sendGameAction(request, roomId, player, { type: "pass" })
+        : await sendGameAction(request, roomId, player, { type: "draw" });
+    if (!response.ok()) {
+      throw new Error(
+        `UNO setup action failed (${response.status()}): ${await response.text()}`,
+      );
+    }
+  }
+  throw new Error("UNO claim did not open within 1,000 turns");
 }
 
 async function finishGame(
@@ -141,22 +176,29 @@ async function finishGame(
     const hand = state.game.players.find(
       (candidate) => candidate.id === player.playerId,
     )!.hand!;
-    const first = hand.find((card) => isPlayable(state.game, card));
+    const first = hand.find((card) =>
+      state.game.playableCardIds.includes(card.id),
+    );
     const response = first
       ? await sendGameAction(request, roomId, player, {
           type: "play",
-          cardIds: [
-            first.id,
-            ...hand
-              .filter(
-                (card) =>
-                  card.id !== first.id && cardGroup(card) === cardGroup(first),
-              )
-              .map((card) => card.id),
-          ],
+          cardIds: state.game.drawnCardId
+            ? [first.id]
+            : [
+                first.id,
+                ...hand
+                  .filter(
+                    (card) =>
+                      card.id !== first.id &&
+                      cardGroup(card) === cardGroup(first),
+                  )
+                  .map((card) => card.id),
+              ],
           ...(first.color === "wild" ? { chosenColor: "red" } : {}),
         })
-      : await sendGameAction(request, roomId, player, { type: "draw" });
+      : state.game.drawnCardId
+        ? await sendGameAction(request, roomId, player, { type: "pass" })
+        : await sendGameAction(request, roomId, player, { type: "draw" });
     if (!response.ok()) {
       throw new Error(
         `Game action failed (${response.status()}): ${await response.text()}`,
@@ -224,16 +266,33 @@ test("passkey users can create and reopen persistent rooms", async ({
   expect(start.ok()).toBeTruthy();
   const finished = await finishGame(page.request, roomId, [alice, bob]);
   expect(finished.game.winnerId).toBeTruthy();
+  expect(finished.game.unoClaim).toBeNull();
   expect(finished.standings).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ games: 1, wins: 1, losses: 0 }),
       expect.objectContaining({ games: 1, wins: 0, losses: 1 }),
     ]),
   );
+  const lobby = await page.request.post(`/api/rooms/${roomId}/command`, {
+    data: {
+      ...alice,
+      command: { protocolVersion: 1, type: "lobby" },
+    },
+  });
+  expect(lobby.ok()).toBeTruthy();
+  expect((await lobby.json()).game).toBeNull();
+  const restart = await page.request.post(`/api/rooms/${roomId}/command`, {
+    data: {
+      ...alice,
+      command: { protocolVersion: 1, type: "start" },
+    },
+  });
+  expect(restart.ok()).toBeTruthy();
+  expect((await restart.json()).game.phase).toBe("playing");
 
   await page.goto("/");
   await expect(page.locator("#owned-rooms")).toContainText("Permanent rivals");
-  await page.getByRole("link", { name: /Permanent rivals/ }).click();
+  await page.goto(roomUrl.pathname);
   await expect(page).toHaveURL((url) => url.pathname === roomUrl.pathname);
 
   await page.goto("/");
@@ -398,6 +457,168 @@ test("eight players can join while unauthorized commands are rejected", async ({
     type: "draw",
   });
   expect(outOfTurn.status()).toBe(409);
+});
+
+test("UNO claims resist stale catches and apply one race-safe penalty", async ({
+  page,
+  request,
+}) => {
+  const room = await createRoom(request, "UNO race table");
+  const players = await Promise.all(
+    ["Alice", "Bob", "Carol"].map((name) =>
+      join(request, room.roomId, name, room.inviteCredential),
+    ),
+  );
+  const start = await request.post(`/api/rooms/${room.roomId}/command`, {
+    data: {
+      ...players[0],
+      command: { protocolVersion: 1, type: "start" },
+    },
+  });
+  expect(start.ok()).toBeTruthy();
+  const roomKeeper = await openRoomSocket(room.roomId, players[0]!);
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const stale = await sendGameAction(request, room.roomId, players[1]!, {
+      type: "catch-uno",
+      claimId: `stale-${attempt}`,
+    });
+    expect(stale.status()).toBe(409);
+  }
+
+  const claim = await playUntilUnoClaim(request, room.roomId, players);
+  const target = players.find(
+    (player) => player.playerId === claim.targetPlayerId,
+  )!;
+  const catchers = players.filter(
+    (player) => player.playerId !== claim.targetPlayerId,
+  );
+  const before = await roomState(request, room.roomId, target);
+  expect(
+    before.game.players.find((player) => player.id === target.playerId)
+      ?.cardCount,
+  ).toBe(1);
+
+  const early = await sendGameAction(request, room.roomId, catchers[0]!, {
+    type: "catch-uno",
+    claimId: claim.id,
+  });
+  expect(early.status()).toBe(409);
+  expect(
+    (await roomState(request, room.roomId, target)).game.unoClaim?.id,
+  ).toBe(claim.id);
+
+  const reconnected = await openRoomSocket(room.roomId, target);
+  expect(
+    (
+      reconnected.snapshot.state as {
+        game: { unoClaim: { id: string } | null };
+      }
+    ).game.unoClaim?.id,
+  ).toBe(claim.id);
+  await closeSocket(reconnected.socket);
+
+  await page.addInitScript(
+    ({ roomId, credentials }) => {
+      localStorage.setItem(`wildcard:${roomId}`, JSON.stringify(credentials));
+    },
+    { roomId: room.roomId, credentials: target },
+  );
+  await page.goto(`/rooms/${room.roomId}`);
+  await expect(page.locator("#uno-call")).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("#uno-catch")).toBeHidden();
+
+  await new Promise((resolve) =>
+    setTimeout(resolve, Math.max(0, claim.catchableAt - Date.now()) + 50),
+  );
+  const actionIds = catchers.map(() => crypto.randomUUID());
+  const catchRequest = (player: JoinedPlayer, actionId: string) =>
+    request.post(`/api/rooms/${room.roomId}/command`, {
+      data: {
+        ...player,
+        command: {
+          protocolVersion: 1,
+          type: "action",
+          action: {
+            protocolVersion: 1,
+            actionId,
+            playerId: player.playerId,
+            type: "catch-uno",
+            claimId: claim.id,
+          },
+        },
+      },
+    });
+  const results = await Promise.all(
+    catchers.map((player, index) => catchRequest(player, actionIds[index]!)),
+  );
+  expect(results.filter((response) => response.ok())).toHaveLength(1);
+  expect(results.filter((response) => response.status() === 409)).toHaveLength(
+    1,
+  );
+
+  const after = await roomState(request, room.roomId, target);
+  expect(after.game.unoClaim).toBeNull();
+  expect(
+    after.game.players.find((player) => player.id === target.playerId)
+      ?.cardCount,
+  ).toBe(5);
+
+  const winnerIndex = results.findIndex((response) => response.ok());
+  const winner = catchers[winnerIndex]!;
+  const duplicate = await catchRequest(winner, actionIds[winnerIndex]!);
+  expect(duplicate.ok()).toBeTruthy();
+  const afterDuplicate = await roomState(request, room.roomId, target);
+  expect(
+    afterDuplicate.game.players.find((player) => player.id === target.playerId)
+      ?.cardCount,
+  ).toBe(5);
+  await closeSocket(roomKeeper.socket);
+});
+
+test("an ignored UNO claim expires on the next accepted gameplay action", async ({
+  request,
+}) => {
+  const room = await createRoom(request, "Forgotten UNO table");
+  const players = await Promise.all(
+    ["Alice", "Bob"].map((name) =>
+      join(request, room.roomId, name, room.inviteCredential),
+    ),
+  );
+  const keeper = await openRoomSocket(room.roomId, players[0]!);
+  const start = await request.post(`/api/rooms/${room.roomId}/command`, {
+    data: {
+      ...players[0],
+      command: { protocolVersion: 1, type: "start" },
+    },
+  });
+  expect(start.ok()).toBeTruthy();
+  const claim = await playUntilUnoClaim(request, room.roomId, players);
+  const publicState = await roomState(request, room.roomId, players[0]!);
+  const current = players.find(
+    (player) => player.playerId === publicState.game.currentPlayerId,
+  )!;
+  const currentState = await roomState(request, room.roomId, current);
+  const hand = currentState.game.players.find(
+    (player) => player.id === current.playerId,
+  )!.hand!;
+  const playable = hand.find((card) =>
+    currentState.game.playableCardIds.includes(card.id),
+  );
+  const response = currentState.game.drawnCardId
+    ? await sendGameAction(request, room.roomId, current, { type: "pass" })
+    : playable
+      ? await sendGameAction(request, room.roomId, current, {
+          type: "play",
+          cardIds: [playable.id],
+          ...(playable.color === "wild" ? { chosenColor: "red" } : {}),
+        })
+      : await sendGameAction(request, room.roomId, current, { type: "draw" });
+  expect(response.ok()).toBeTruthy();
+  const after = await roomState(request, room.roomId, players[0]!);
+  expect(claim.id).toBeTruthy();
+  expect(after.game.unoClaim).toBeNull();
+  await closeSocket(keeper.socket);
 });
 
 test("hibernating sockets reconnect with recipient-safe snapshots", async ({

@@ -1,5 +1,5 @@
 import { createStandardDeck, randomShuffle } from "./deck.ts";
-import { DEFAULT_GAME_RULES, validateRules } from "./rules.ts";
+import { DEFAULT_GAME_RULES, normalizeRules, validateRules } from "./rules.ts";
 import {
   GAME_PROTOCOL_VERSION,
   GameRuleError,
@@ -23,6 +23,8 @@ export interface CreateGameOptions {
 
 export interface ApplyActionOptions {
   shuffle?: Shuffle;
+  now?: number;
+  generateClaimId?: () => string;
 }
 
 export function createGame({
@@ -31,9 +33,10 @@ export function createGame({
   deck = createStandardDeck(),
   shuffle = randomShuffle(),
 }: CreateGameOptions): GameState {
-  validateRules(rules);
-  validatePlayers(players, rules);
-  validateDeck(deck, players.length * rules.initialHandSize + 1);
+  const normalizedRules = normalizeRules(rules);
+  validateRules(normalizedRules);
+  validatePlayers(players, normalizedRules);
+  validateDeck(deck, players.length * normalizedRules.initialHandSize + 1);
 
   const drawPile = shuffle(deck.map((card) => ({ ...card })));
   const gamePlayers = players.map((player) => ({
@@ -41,7 +44,7 @@ export function createGame({
     hand: [] as Card[],
   }));
 
-  for (let round = 0; round < rules.initialHandSize; round++) {
+  for (let round = 0; round < normalizedRules.initialHandSize; round++) {
     for (const player of gamePlayers) player.hand.push(drawRequired(drawPile));
   }
 
@@ -56,7 +59,7 @@ export function createGame({
 
   return {
     protocolVersion: GAME_PROTOCOL_VERSION,
-    rules: { ...rules },
+    rules: normalizedRules,
     phase: "playing",
     players: gamePlayers,
     drawPile,
@@ -65,6 +68,9 @@ export function createGame({
     direction: 1,
     activeColor: initialDiscard.color,
     pendingDraw: null,
+    drawnCardId: null,
+    unoClaim: null,
+    actionSequence: 0,
     winnerId: null,
     turnNumber: 1,
   };
@@ -73,18 +79,144 @@ export function createGame({
 export function applyAction(
   state: GameState,
   action: GameAction,
-  { shuffle = randomShuffle() }: ApplyActionOptions = {},
+  {
+    shuffle = randomShuffle(),
+    now = Date.now(),
+    generateClaimId = () => crypto.randomUUID(),
+  }: ApplyActionOptions = {},
 ): TransitionResult {
   validateStateAndAction(state, action);
   const next = cloneState(state);
-  const player = next.players[next.currentPlayerIndex]!;
+  next.actionSequence += 1;
 
-  if (action.type === "draw") return applyDraw(next, player.id, shuffle);
-  if (action.type === "play") return applyPlay(next, action, player.id);
-  throw new GameRuleError("invalid-action", "Unknown game action");
+  if (action.type === "call-uno") return applyCallUno(next, action);
+  if (action.type === "catch-uno")
+    return applyCatchUno(next, action, now, shuffle);
+
+  const expiredClaim = next.unoClaim;
+  next.unoClaim = null;
+  const player = next.players[next.currentPlayerIndex]!;
+  let result: TransitionResult;
+  if (action.type === "draw") result = applyDraw(next, player.id, shuffle);
+  else if (action.type === "pass") result = applyPass(next);
+  else if (action.type === "play") result = applyPlay(next, action, player.id);
+  else throw new GameRuleError("invalid-action", "Unknown game action");
+
+  if (expiredClaim) {
+    result.events.push({
+      type: "uno-expired",
+      playerId: expiredClaim.targetPlayerId,
+      claimId: expiredClaim.id,
+    });
+  }
+
+  if (
+    action.type === "play" &&
+    result.state.rules.unoEnabled &&
+    result.state.phase === "playing" &&
+    player.hand.length === 1
+  ) {
+    const claim = {
+      id: generateClaimId(),
+      targetPlayerId: player.id,
+      openedAtSequence: result.state.actionSequence,
+      catchableAt: now + result.state.rules.unoGraceMs,
+    };
+    result.state.unoClaim = claim;
+    result.events.push({ type: "uno-opened", claim: { ...claim } });
+  }
+
+  return result;
+}
+
+function applyCallUno(
+  state: GameState,
+  action: Extract<GameAction, { type: "call-uno" }>,
+): TransitionResult {
+  const claim = requireUnoClaim(state, action.claimId);
+  if (action.playerId !== claim.targetPlayerId) {
+    throw new GameRuleError(
+      "uno-not-target",
+      "Only the exposed player can call UNO for this claim",
+    );
+  }
+  state.unoClaim = null;
+  return {
+    state,
+    events: [
+      { type: "uno-called", playerId: action.playerId, claimId: claim.id },
+    ],
+  };
+}
+
+function applyCatchUno(
+  state: GameState,
+  action: Extract<GameAction, { type: "catch-uno" }>,
+  now: number,
+  shuffle: Shuffle,
+): TransitionResult {
+  const claim = requireUnoClaim(state, action.claimId);
+  if (action.playerId === claim.targetPlayerId) {
+    throw new GameRuleError("uno-self-catch", "A player cannot catch themself");
+  }
+  if (now < claim.catchableAt) {
+    throw new GameRuleError(
+      "uno-too-early",
+      "The exposed player still has time to call UNO",
+    );
+  }
+
+  const target = state.players.find(
+    (player) => player.id === claim.targetPlayerId,
+  );
+  if (!target || target.hand.length !== 1) {
+    throw new GameRuleError("uno-stale", "This UNO claim is no longer active");
+  }
+
+  for (let index = 0; index < state.rules.unoCatchPenalty; index++) {
+    replenishDrawPile(state, shuffle);
+    target.hand.push(drawRequired(state.drawPile));
+  }
+  state.unoClaim = null;
+  return {
+    state,
+    events: [
+      {
+        type: "cards-drawn",
+        playerId: target.id,
+        count: state.rules.unoCatchPenalty,
+        penalty: true,
+      },
+      {
+        type: "uno-caught",
+        playerId: action.playerId,
+        targetPlayerId: target.id,
+        claimId: claim.id,
+        penalty: state.rules.unoCatchPenalty,
+      },
+    ],
+  };
+}
+
+function requireUnoClaim(state: GameState, claimId: string) {
+  if (!state.rules.unoEnabled) {
+    throw new GameRuleError("uno-disabled", "UNO calls are disabled");
+  }
+  const claim = state.unoClaim;
+  if (!claim || !claimId || claim.id !== claimId) {
+    throw new GameRuleError("uno-stale", "This UNO claim is no longer active");
+  }
+  const target = state.players.find(
+    (player) => player.id === claim.targetPlayerId,
+  );
+  if (!target || target.hand.length !== 1) {
+    throw new GameRuleError("uno-stale", "This UNO claim is no longer active");
+  }
+  return claim;
 }
 
 export function canPlayCard(state: GameState, card: Card): boolean {
+  if (state.drawnCardId !== null && card.id !== state.drawnCardId) return false;
   if (state.pendingDraw) {
     return (
       state.rules.drawStacking === "same-type" &&
@@ -125,6 +257,15 @@ function applyPlay(
   }
 
   const player = state.players[state.currentPlayerIndex]!;
+  if (
+    state.drawnCardId !== null &&
+    (action.cardIds.length !== 1 || action.cardIds[0] !== state.drawnCardId)
+  ) {
+    throw new GameRuleError(
+      "illegal-play",
+      "Only the card drawn this turn may be played",
+    );
+  }
   const cards = action.cardIds.map((cardId) => {
     const card = player.hand.find((candidate) => candidate.id === cardId);
     if (!card)
@@ -165,6 +306,7 @@ function applyPlay(
 
   const playedIds = new Set(action.cardIds);
   player.hand = player.hand.filter((card) => !playedIds.has(card.id));
+  state.drawnCardId = null;
 
   let skippedPlayers = 0;
   for (const card of cards) {
@@ -203,20 +345,46 @@ function applyDraw(
   playerId: string,
   shuffle: Shuffle,
 ): TransitionResult {
+  if (state.drawnCardId !== null) {
+    throw new GameRuleError(
+      "invalid-action",
+      "The drawn card must be played or kept before drawing again",
+    );
+  }
+
   const player = state.players[state.currentPlayerIndex]!;
   const penalty = state.pendingDraw !== null;
   const count = state.pendingDraw?.amount ?? 1;
+  let drawnCard: Card | null = null;
 
   for (let index = 0; index < count; index++) {
     replenishDrawPile(state, shuffle);
-    player.hand.push(drawRequired(state.drawPile));
+    drawnCard = drawRequired(state.drawPile);
+    player.hand.push(drawnCard);
   }
 
   state.pendingDraw = null;
   const events: GameEvent[] = [
     { type: "cards-drawn", playerId, count, penalty },
   ];
-  if (penalty || state.rules.drawEndsTurn) finishTurn(state, 1, events);
+  if (!penalty && drawnCard && canPlayCard(state, drawnCard)) {
+    state.drawnCardId = drawnCard.id;
+  } else if (penalty || state.rules.drawEndsTurn) {
+    finishTurn(state, 1, events);
+  }
+  return { state, events };
+}
+
+function applyPass(state: GameState): TransitionResult {
+  if (state.drawnCardId === null) {
+    throw new GameRuleError(
+      "invalid-action",
+      "No drawn card is awaiting a decision",
+    );
+  }
+  state.drawnCardId = null;
+  const events: GameEvent[] = [];
+  finishTurn(state, 1, events);
   return { state, events };
 }
 
@@ -269,12 +437,34 @@ function validateStateAndAction(state: GameState, action: GameAction): void {
   if (typeof action.actionId !== "string" || action.actionId.length === 0) {
     throw new GameRuleError("invalid-action", "Action ID is required");
   }
-  const currentPlayer = state.players[state.currentPlayerIndex];
-  if (!currentPlayer || action.playerId !== currentPlayer.id) {
-    throw new GameRuleError("not-your-turn", "It is not this player's turn");
-  }
-  if (action.type !== "draw" && action.type !== "play") {
+  if (
+    action.type !== "draw" &&
+    action.type !== "pass" &&
+    action.type !== "play" &&
+    action.type !== "call-uno" &&
+    action.type !== "catch-uno"
+  ) {
     throw new GameRuleError("invalid-action", "Unknown game action");
+  }
+  if (!state.players.some((player) => player.id === action.playerId)) {
+    throw new GameRuleError(
+      "invalid-action",
+      "Player is not seated in the game",
+    );
+  }
+  if (
+    (action.type === "call-uno" || action.type === "catch-uno") &&
+    (typeof action.claimId !== "string" || action.claimId.length === 0)
+  ) {
+    throw new GameRuleError("invalid-action", "UNO claim ID is required");
+  }
+  const currentPlayer = state.players[state.currentPlayerIndex];
+  if (
+    action.type !== "call-uno" &&
+    action.type !== "catch-uno" &&
+    (!currentPlayer || action.playerId !== currentPlayer.id)
+  ) {
+    throw new GameRuleError("not-your-turn", "It is not this player's turn");
   }
 }
 
@@ -359,5 +549,6 @@ function cloneState(state: GameState): GameState {
     drawPile: state.drawPile.map((card) => ({ ...card })),
     discardPile: state.discardPile.map((card) => ({ ...card })),
     pendingDraw: state.pendingDraw ? { ...state.pendingDraw } : null,
+    unoClaim: state.unoClaim ? { ...state.unoClaim } : null,
   };
 }

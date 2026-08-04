@@ -53,6 +53,22 @@ export type RoomCommand =
       rules?: GameRules;
     })
   | (BaseCommand & {
+      type: "lobby";
+      playerId: string;
+      reconnectHash: string;
+    })
+  | (BaseCommand & {
+      type: "kick";
+      playerId: string;
+      reconnectHash: string;
+      targetPlayerId: string;
+    })
+  | (BaseCommand & {
+      type: "end-game";
+      playerId: string;
+      reconnectHash: string;
+    })
+  | (BaseCommand & {
       type: "action";
       playerId: string;
       reconnectHash: string;

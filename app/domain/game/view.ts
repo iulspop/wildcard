@@ -24,6 +24,12 @@ export interface GameView {
   direction: 1 | -1;
   activeColor: CardColor;
   pendingDraw: { kind: DrawKind; amount: number } | null;
+  drawnCardId: string | null;
+  unoClaim: {
+    id: string;
+    targetPlayerId: string;
+    catchableAt: number;
+  } | null;
   playableCardIds: string[];
   winnerId: string | null;
   turnNumber: number;
@@ -50,6 +56,14 @@ export function projectGame(state: GameState, viewerId?: string): GameView {
     direction: state.direction,
     activeColor: state.activeColor,
     pendingDraw: state.pendingDraw ? { ...state.pendingDraw } : null,
+    drawnCardId: state.drawnCardId,
+    unoClaim: state.unoClaim
+      ? {
+          id: state.unoClaim.id,
+          targetPlayerId: state.unoClaim.targetPlayerId,
+          catchableAt: state.unoClaim.catchableAt,
+        }
+      : null,
     playableCardIds:
       viewerId === state.players[state.currentPlayerIndex]!.id
         ? state.players[state.currentPlayerIndex]!.hand.filter((card) =>
