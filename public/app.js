@@ -1,4 +1,4 @@
-/* global document, fetch, btoa, atob, location, localStorage, navigator, FormData, URLSearchParams, sessionStorage, history, WebSocket, setTimeout, clearTimeout, crypto, window */
+/* global document, fetch, btoa, atob, location, localStorage, navigator, FormData, URL, URLSearchParams, sessionStorage, history, WebSocket, setTimeout, clearTimeout, crypto, window */
 const $ = (s) => document.querySelector(s);
 const api = async (url, options = {}) => {
   const response = await fetch(url, {
@@ -65,7 +65,8 @@ let sessionUser = null,
   audioContext = null,
   previousTurn = null,
   previousWinner = null,
-  messageTimer = null;
+  messageTimer = null,
+  roomInviteCredential = roomId ? inviteFromHash() : undefined;
 function message(text, error = false, persistent = false) {
   const el = $("#status");
   clearTimeout(messageTimer);
@@ -190,8 +191,10 @@ function inviteFromHash() {
 async function joinRoom(event) {
   event.preventDefault();
   const inviteCredential = inviteFromHash();
-  if (inviteCredential)
+  if (inviteCredential) {
+    roomInviteCredential = inviteCredential;
     sessionStorage.setItem(`invite:${roomId}`, inviteCredential);
+  }
   const data = await api(`/api/rooms/${roomId}/join`, {
     method: "POST",
     body: JSON.stringify({
@@ -238,7 +241,10 @@ function applyState(next) {
   $("#join-panel").classList.add("hidden");
   $("#room-panel").classList.remove("hidden");
   $("#room-name").textContent = state.room.name;
-  $("#invite-url").value = location.href;
+  const inviteUrl = new URL(location.pathname, location.origin);
+  if (roomInviteCredential)
+    inviteUrl.hash = `invite=${encodeURIComponent(roomInviteCredential)}`;
+  $("#invite-url").value = inviteUrl.href;
   render();
 }
 function cardLabel(card) {
