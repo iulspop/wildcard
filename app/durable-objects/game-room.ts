@@ -405,7 +405,7 @@ export class GameRoom implements DurableObject {
       name,
       command.ownerUserId ?? null,
       command.persistent ? 1 : 0,
-      command.inviteHash ?? null,
+      null,
       now,
     );
     return this.publicState({
@@ -414,7 +414,6 @@ export class GameRoom implements DurableObject {
         name,
         ownerUserId: command.ownerUserId ?? null,
         persistent: command.persistent,
-        protected: Boolean(command.inviteHash),
         createdAt: now,
         version: 1,
       },
@@ -428,19 +427,6 @@ export class GameRoom implements DurableObject {
     command: Extract<RoomCommand, { type: "join" }>,
   ): { playerId: string; state: RoomStateResponse } {
     const row = this.metadataRow()!;
-    const ownerAuthorized =
-      Boolean(command.authenticatedUserId) &&
-      command.authenticatedUserId === row.owner_user_id;
-    if (
-      row.invite_hash &&
-      row.invite_hash !== command.inviteHash &&
-      !ownerAuthorized
-    )
-      throw new RoomError(
-        "invite-required",
-        "The room invite credential is invalid",
-        403,
-      );
     if (stored.seats.some((seat) => seat.playerId === command.playerId))
       throw new RoomError("player-exists", "Player is already seated", 409);
     const displayName = validateName(command.displayName, "Display name");
@@ -862,7 +848,6 @@ function mapMetadata(row: MetadataRow): RoomMetadata {
     name: row.name,
     ownerUserId: row.owner_user_id,
     persistent: Boolean(row.persistent),
-    protected: Boolean(row.invite_hash),
     createdAt: row.created_at,
     version: row.version,
   };

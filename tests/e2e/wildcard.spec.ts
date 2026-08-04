@@ -30,21 +30,16 @@ async function createRoom(request: APIRequestContext, name: string) {
     data: { name, persistent: false },
   });
   expect(response.status()).toBe(201);
-  const room = (await response.json()) as { roomId: string; inviteUrl: string };
-  return {
-    ...room,
-    inviteCredential: new URL(room.inviteUrl).hash.replace("#invite=", ""),
-  };
+  return (await response.json()) as { roomId: string; inviteUrl: string };
 }
 
 async function join(
   request: APIRequestContext,
   roomId: string,
   displayName: string,
-  inviteCredential?: string,
 ) {
   const response = await request.post(`/api/rooms/${roomId}/join`, {
-    data: { displayName, inviteCredential },
+    data: { displayName },
   });
   expect(response.status()).toBe(201);
   return (await response.json()) as JoinedPlayer & { state: unknown };
@@ -252,12 +247,11 @@ test("passkey users can create and reopen persistent rooms", async ({
   await page.getByLabel("Name your room").fill("Permanent rivals");
   await page.getByLabel("Keep this room and its standings").check();
   await page.getByRole("button", { name: "Create private room" }).click();
-  await expect(page).toHaveURL(/\/rooms\/[A-Za-z0-9_-]+#invite=.+$/);
+  await expect(page).toHaveURL(/\/rooms\/[A-Za-z0-9_-]+$/);
   const roomUrl = new URL(page.url());
   const roomId = roomUrl.pathname.split("/").at(-1)!;
-  const inviteCredential = roomUrl.hash.replace("#invite=", "");
-  const alice = await join(request, roomId, "Alice", inviteCredential);
-  const bob = await join(request, roomId, "Bob", inviteCredential);
+  const alice = await join(request, roomId, "Alice");
+  const bob = await join(request, roomId, "Bob");
   const start = await request.post(`/api/rooms/${roomId}/command`, {
     data: {
       ...alice,
@@ -316,29 +310,28 @@ test("passkey users can create and reopen persistent rooms", async ({
   await expect(page.locator("#owned-rooms")).toContainText("Permanent rivals");
 });
 
-test("guest players can create, join, and start a protected room privately", async ({
+test("guest players can create, join, and start a room from its private URL", async ({
   page,
   request,
 }) => {
   const createdResponse = await request.post("/api/rooms", {
-    data: { name: "E2E table", protected: true, persistent: false },
+    data: { name: "E2E table", persistent: false },
   });
   expect(createdResponse.status()).toBe(201);
   const created = (await createdResponse.json()) as {
     roomId: string;
     inviteUrl: string;
   };
-  const invite = new URL(created.inviteUrl).hash.slice("#invite=".length);
-  expect(invite.length).toBeGreaterThan(20);
+  expect(new URL(created.inviteUrl).hash).toBe("");
 
   const aliceResponse = await request.post(
     `/api/rooms/${created.roomId}/join`,
     {
-      data: { displayName: "Alice", inviteCredential: invite },
+      data: { displayName: "Alice" },
     },
   );
   const bobResponse = await request.post(`/api/rooms/${created.roomId}/join`, {
-    data: { displayName: "Bob", inviteCredential: invite },
+    data: { displayName: "Bob" },
   });
   expect(aliceResponse.status()).toBe(201);
   expect(bobResponse.status()).toBe(201);
@@ -411,31 +404,18 @@ test("guest players can create, join, and start a protected room privately", asy
   }
 });
 
-test("invalid protected-room credentials are rejected", async ({ request }) => {
-  const created = await (
-    await request.post("/api/rooms", {
-      data: { name: "Locked", protected: true },
-    })
-  ).json();
-  const response = await request.post(`/api/rooms/${created.roomId}/join`, {
-    data: { displayName: "Intruder", inviteCredential: "wrong" },
-  });
-  expect(response.status()).toBe(403);
-});
-
 test("eight players can join while unauthorized commands are rejected", async ({
   request,
 }) => {
   const room = await createRoom(request, "Eight player table");
   const players = await Promise.all(
     Array.from({ length: 8 }, (_, index) =>
-      join(request, room.roomId, `Player ${index + 1}`, room.inviteCredential),
+      join(request, room.roomId, `Player ${index + 1}`),
     ),
   );
   const ninth = await request.post(`/api/rooms/${room.roomId}/join`, {
     data: {
       displayName: "Player 9",
-      inviteCredential: room.inviteCredential,
     },
   });
   expect(ninth.status()).toBe(409);
@@ -478,9 +458,7 @@ test("UNO claims resist stale catches and apply one race-safe penalty", async ({
 }) => {
   const room = await createRoom(request, "UNO race table");
   const players = await Promise.all(
-    ["Alice", "Bob", "Carol"].map((name) =>
-      join(request, room.roomId, name, room.inviteCredential),
-    ),
+    ["Alice", "Bob", "Carol"].map((name) => join(request, room.roomId, name)),
   );
   const start = await request.post(`/api/rooms/${room.roomId}/command`, {
     data: {
@@ -594,9 +572,7 @@ test("an ignored UNO claim expires on the next accepted gameplay action", async 
 }) => {
   const room = await createRoom(request, "Forgotten UNO table");
   const players = await Promise.all(
-    ["Alice", "Bob"].map((name) =>
-      join(request, room.roomId, name, room.inviteCredential),
-    ),
+    ["Alice", "Bob"].map((name) => join(request, room.roomId, name)),
   );
   const keeper = await openRoomSocket(room.roomId, players[0]!);
   const start = await request.post(`/api/rooms/${room.roomId}/command`, {
@@ -638,13 +614,8 @@ test("hibernating sockets reconnect with recipient-safe snapshots", async ({
   request,
 }) => {
   const room = await createRoom(request, "Reconnect table");
-  const alice = await join(
-    request,
-    room.roomId,
-    "Alice",
-    room.inviteCredential,
-  );
-  const bob = await join(request, room.roomId, "Bob", room.inviteCredential);
+  const alice = await join(request, room.roomId, "Alice");
+  const bob = await join(request, room.roomId, "Bob");
   const aliceConnection = await openRoomSocket(room.roomId, alice);
   const bobConnection = await openRoomSocket(room.roomId, bob);
 
@@ -686,12 +657,7 @@ test("temporary rooms expire after their final socket disconnect", async ({
   request,
 }) => {
   const room = await createRoom(request, "Expiring table");
-  const alice = await join(
-    request,
-    room.roomId,
-    "Alice",
-    room.inviteCredential,
-  );
+  const alice = await join(request, room.roomId, "Alice");
   const connection = await openRoomSocket(room.roomId, alice);
   await closeSocket(connection.socket);
 

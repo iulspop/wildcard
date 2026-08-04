@@ -72,9 +72,9 @@ For rollback, deploy a previously verified Worker version. D1 migrations are for
 
 ## Security and operations
 
-- Invite credentials are returned only in URL fragments and only SHA-256 hashes are persisted.
+- Room IDs are high-entropy, unguessable capabilities; anyone with the complete room URL can join.
 - Session cookies are signed, `HttpOnly`, `Secure` outside localhost, and `SameSite=Lax`.
-- Reconnect tokens, passkey challenges, room credentials, and opponent hands are never included in public snapshots.
+- Reconnect tokens, passkey challenges, and opponent hands are never included in public snapshots.
 - WebSocket upgrades enforce the configured origin, bounded payloads, and per-socket action throttling.
 - Monitor Worker/DO requests and CPU, D1 reads/writes, Durable Object storage, exceptions, and reconnect rates against Cloudflare free-plan limits.
 

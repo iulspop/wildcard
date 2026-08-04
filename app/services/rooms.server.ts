@@ -63,7 +63,6 @@ async function listOwnedRooms(request: Request, env: WorkerEnv) {
           roomId: string;
           name: string;
           ownerUserId: string | null;
-          protected: boolean;
         };
         standings: unknown[];
       };
@@ -71,7 +70,6 @@ async function listOwnedRooms(request: Request, env: WorkerEnv) {
       return {
         roomId: state.room.roomId,
         name: state.room.name,
-        protected: state.room.protected,
         createdAt: ownedRoom.created_at,
         standingsCount: state.standings.length,
       };
@@ -125,7 +123,6 @@ async function createRoom(request: Request, env: WorkerEnv) {
     );
 
   const roomId = randomToken(18);
-  const inviteCredential = randomToken(32);
   const command: RoomCommand = {
     protocolVersion: ROOM_PROTOCOL_VERSION,
     type: "create",
@@ -133,7 +130,6 @@ async function createRoom(request: Request, env: WorkerEnv) {
     name: input.name ?? "Wildcard room",
     persistent: Boolean(input.persistent),
     ...(user ? { ownerUserId: user.id } : {}),
-    inviteHash: await hashSecret(inviteCredential),
   };
   const stub = env.GAME_ROOMS.get(env.GAME_ROOMS.idFromName(roomId));
   if (user && input.persistent) {
@@ -159,7 +155,7 @@ async function createRoom(request: Request, env: WorkerEnv) {
   return Response.json(
     {
       roomId,
-      inviteUrl: `${new URL(request.url).origin}/rooms/${roomId}#invite=${inviteCredential}`,
+      inviteUrl: `${new URL(request.url).origin}/rooms/${roomId}`,
     },
     { status: 201 },
   );
@@ -172,7 +168,6 @@ async function joinRoom(
 ) {
   const input = await readJson<{
     displayName?: string;
-    inviteCredential?: string;
   }>(request);
   const user = await getSessionUser(request, env.AUTH_DB, env.SESSION_SECRET);
   const playerId = crypto.randomUUID();
@@ -183,9 +178,6 @@ async function joinRoom(
     playerId,
     displayName: input.displayName ?? "",
     reconnectHash: await hashSecret(reconnectToken),
-    ...(input.inviteCredential
-      ? { inviteHash: await hashSecret(input.inviteCredential) }
-      : {}),
     ...(user ? { authenticatedUserId: user.id } : {}),
   };
   const response = await stub.fetch("https://room.internal/command", {

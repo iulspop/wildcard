@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { hashSecret } from "./rooms.server.ts";
 
-describe("room credentials", () => {
-  it("hashes invite and reconnect credentials without retaining plaintext", async () => {
-    const credential = "invite-secret";
+describe("room reconnect credentials", () => {
+  it("hashes reconnect credentials without retaining plaintext", async () => {
+    const credential = "reconnect-secret";
     const hash = await hashSecret(credential);
 
     expect(hash).toHaveLength(64);

@@ -1,4 +1,4 @@
-/* global document, fetch, btoa, atob, location, localStorage, navigator, FormData, URL, URLSearchParams, sessionStorage, history, WebSocket, setTimeout, clearTimeout, crypto, window */
+/* global document, fetch, btoa, atob, location, localStorage, navigator, FormData, URL, history, WebSocket, setTimeout, clearTimeout, crypto, window */
 const $ = (s) => document.querySelector(s);
 const api = async (url, options = {}) => {
   const response = await fetch(url, {
@@ -74,8 +74,7 @@ let sessionUser = null,
   pendingKickPlayerId = null,
   pendingDeleteRoom = null,
   unoTimer = null,
-  messageTimer = null,
-  roomInviteCredential = roomId ? inviteFromHash() : undefined;
+  messageTimer = null;
 function message(text, error = false, persistent = false) {
   const el = $("#status");
   clearTimeout(messageTimer);
@@ -117,7 +116,7 @@ async function loadOwnedRooms() {
     ? data.rooms
         .map(
           (room) =>
-            `<li><a href="/rooms/${encodeURIComponent(room.roomId)}"><strong>${escapeHTML(room.name)}</strong><span>${room.protected ? "Protected" : "Open"} · ${room.standingsCount} ranked players</span></a><button class="owned-room-delete" type="button" data-room-id="${room.roomId}" data-room-name="${escapeHTML(room.name)}" aria-label="Delete ${escapeHTML(room.name)}">Delete</button></li>`,
+            `<li><a href="/rooms/${encodeURIComponent(room.roomId)}"><strong>${escapeHTML(room.name)}</strong><span>${room.standingsCount} ranked players</span></a><button class="owned-room-delete" type="button" data-room-id="${room.roomId}" data-room-name="${escapeHTML(room.name)}" aria-label="Delete ${escapeHTML(room.name)}">Delete</button></li>`,
         )
         .join("")
     : '<li class="empty">No persistent rooms yet.</li>';
@@ -193,25 +192,12 @@ async function createRoom(event) {
     });
   location.href = data.inviteUrl;
 }
-function inviteFromHash() {
-  return (
-    new URLSearchParams(location.hash.slice(1)).get("invite") ||
-    sessionStorage.getItem(`invite:${roomId}`) ||
-    undefined
-  );
-}
 async function joinRoom(event) {
   event.preventDefault();
-  const inviteCredential = inviteFromHash();
-  if (inviteCredential) {
-    roomInviteCredential = inviteCredential;
-    sessionStorage.setItem(`invite:${roomId}`, inviteCredential);
-  }
   const data = await api(`/api/rooms/${roomId}/join`, {
     method: "POST",
     body: JSON.stringify({
       displayName: new FormData(event.currentTarget).get("displayName"),
-      inviteCredential,
     }),
   });
   credentials = {
@@ -268,10 +254,7 @@ function applyState(next) {
   $("#join-panel").classList.add("hidden");
   $("#room-panel").classList.remove("hidden");
   $("#room-name").textContent = state.room.name;
-  const inviteUrl = new URL(location.pathname, location.origin);
-  if (roomInviteCredential)
-    inviteUrl.hash = `invite=${encodeURIComponent(roomInviteCredential)}`;
-  $("#invite-url").value = inviteUrl.href;
+  $("#invite-url").value = new URL(location.pathname, location.origin).href;
   render();
 }
 function cardLabel(card) {
@@ -526,7 +509,6 @@ async function confirmDeleteRoom() {
     method: "DELETE",
   });
   localStorage.removeItem(`wildcard:${room.roomId}`);
-  sessionStorage.removeItem(`wildcard:invite:${room.roomId}`);
   message(`${room.name} deleted.`);
   if (roomId === room.roomId) {
     location.href = "/";

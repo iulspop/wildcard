@@ -15,7 +15,6 @@ export interface RoomMetadata {
   name: string;
   ownerUserId: string | null;
   persistent: boolean;
-  protected: boolean;
   createdAt: number;
   version: number;
 }
@@ -30,7 +29,6 @@ export type RoomCommand =
       roomId: string;
       name: string;
       ownerUserId?: string;
-      inviteHash?: string;
       persistent: boolean;
     })
   | (BaseCommand & {
@@ -38,7 +36,6 @@ export type RoomCommand =
       playerId: string;
       displayName: string;
       reconnectHash: string;
-      inviteHash?: string;
       authenticatedUserId?: string;
     })
   | (BaseCommand & {
