@@ -98,7 +98,12 @@ describe("legal plays", () => {
     expect(result.state.players[0]!.hand).toHaveLength(1);
     expect(result.state.activeColor).toBe("blue");
     expect(result.state.currentPlayerIndex).toBe(1);
+    expect(result.state.lastPlay).toEqual({
+      playerId: "p1",
+      cards: [first, second],
+    });
     expect(state.players[0]!.hand).toHaveLength(3);
+    expect(state.lastPlay).toBeNull();
   });
 
   it("requires every grouped card to share the selected rank or action", () => {

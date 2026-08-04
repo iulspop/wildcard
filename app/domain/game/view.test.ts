@@ -17,6 +17,19 @@ it("only exposes the viewing player's hand", () => {
   );
 });
 
+it("projects the public cards from the most recent play", () => {
+  const state = makeTestState();
+  const playedCards = state.players[0]!.hand.slice(0, 2);
+  state.lastPlay = { playerId: "p1", cards: playedCards };
+
+  for (const viewer of ["p1", "p2"]) {
+    expect(projectGame(state, viewer).lastPlay).toEqual({
+      playerId: "p1",
+      cards: playedCards,
+    });
+  }
+});
+
 it("projects only public UNO claim metadata to every player", () => {
   const state = makeTestState({
     unoClaim: {

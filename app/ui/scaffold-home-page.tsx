@@ -234,12 +234,19 @@ export function HomePage() {
                     </button>
                     <small id="draw-count" className="pile-count" />
                   </div>
-                  <div className="pile-wrap">
+                  <div className="pile-wrap discard-wrap">
                     <span className="pile-label">Discard</span>
-                    <div
-                      id="discard"
-                      className="card wild"
-                      aria-label="Top discard"
+                    <div id="discard-stack" className="discard-stack">
+                      <div
+                        id="discard"
+                        className="card wild"
+                        aria-label="Top discard"
+                      />
+                    </div>
+                    <small
+                      id="group-play-indicator"
+                      className="group-play-indicator hidden"
+                      aria-live="polite"
                     />
                   </div>
                 </div>

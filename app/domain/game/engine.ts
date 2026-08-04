@@ -69,6 +69,7 @@ export function createGame({
     activeColor: initialDiscard.color,
     pendingDraw: null,
     drawnCardId: null,
+    lastPlay: null,
     unoClaim: null,
     actionSequence: 0,
     winnerId: null,
@@ -307,6 +308,10 @@ function applyPlay(
   const playedIds = new Set(action.cardIds);
   player.hand = player.hand.filter((card) => !playedIds.has(card.id));
   state.drawnCardId = null;
+  state.lastPlay = {
+    playerId,
+    cards: cards.map((card) => ({ ...card })),
+  };
 
   let skippedPlayers = 0;
   for (const card of cards) {
@@ -549,6 +554,12 @@ function cloneState(state: GameState): GameState {
     drawPile: state.drawPile.map((card) => ({ ...card })),
     discardPile: state.discardPile.map((card) => ({ ...card })),
     pendingDraw: state.pendingDraw ? { ...state.pendingDraw } : null,
+    lastPlay: state.lastPlay
+      ? {
+          playerId: state.lastPlay.playerId,
+          cards: state.lastPlay.cards.map((card) => ({ ...card })),
+        }
+      : null,
     unoClaim: state.unoClaim ? { ...state.unoClaim } : null,
   };
 }

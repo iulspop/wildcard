@@ -62,6 +62,7 @@ export interface GameState {
   activeColor: CardColor;
   pendingDraw: PendingDraw | null;
   drawnCardId: string | null;
+  lastPlay: { playerId: string; cards: Card[] } | null;
   unoClaim: UnoClaim | null;
   actionSequence: number;
   winnerId: string | null;

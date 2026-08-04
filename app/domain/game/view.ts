@@ -25,6 +25,7 @@ export interface GameView {
   activeColor: CardColor;
   pendingDraw: { kind: DrawKind; amount: number } | null;
   drawnCardId: string | null;
+  lastPlay: { playerId: string; cards: Card[] } | null;
   unoClaim: {
     id: string;
     targetPlayerId: string;
@@ -57,6 +58,12 @@ export function projectGame(state: GameState, viewerId?: string): GameView {
     activeColor: state.activeColor,
     pendingDraw: state.pendingDraw ? { ...state.pendingDraw } : null,
     drawnCardId: state.drawnCardId,
+    lastPlay: state.lastPlay
+      ? {
+          playerId: state.lastPlay.playerId,
+          cards: state.lastPlay.cards.map((card) => ({ ...card })),
+        }
+      : null,
     unoClaim: state.unoClaim
       ? {
           id: state.unoClaim.id,

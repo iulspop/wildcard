@@ -43,6 +43,7 @@ export function makeTestState(overrides: Partial<GameState> = {}): GameState {
     activeColor: "red",
     pendingDraw: null,
     drawnCardId: null,
+    lastPlay: null,
     unoClaim: null,
     actionSequence: 0,
     winnerId: null,

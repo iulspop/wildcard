@@ -701,6 +701,7 @@ export class GameRoom implements DurableObject {
     if (game) {
       game.rules = normalizeRules(game.rules);
       if (game.drawnCardId === undefined) game.drawnCardId = null;
+      if (game.lastPlay === undefined) game.lastPlay = null;
       if (game.unoClaim === undefined) game.unoClaim = null;
       if (game.actionSequence === undefined) game.actionSequence = 0;
       const unoTarget = game.unoClaim

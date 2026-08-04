@@ -684,6 +684,61 @@ label {
   color: #bdd0c6;
 }
 
+.discard-wrap {
+  min-width: 126px;
+}
+
+.discard-stack {
+  position: relative;
+  width: 82px;
+  height: 124px;
+  transition: width 180ms ease;
+}
+
+.discard-stack.grouped {
+  width: 116px;
+}
+
+.discard-card {
+  position: absolute;
+  inset: 0 auto auto 0;
+  transform: translateX(calc(var(--discard-index) * 11px))
+    rotate(var(--discard-rotation));
+  transform-origin: 50% 85%;
+}
+
+.discard-stack.grouped .discard-card {
+  animation: grouped-card-land 240ms ease-out both;
+  animation-delay: calc(var(--discard-index) * 45ms);
+}
+
+.group-play-indicator {
+  max-width: 150px;
+  padding: 5px 9px;
+  border: 1px solid #f6c94566;
+  border-radius: 999px;
+  background: #201b0bdd;
+  color: #ffe69a;
+  font-size: 0.68rem;
+  font-weight: 850;
+  line-height: 1.2;
+  text-align: center;
+}
+
+@keyframes grouped-card-land {
+  from {
+    opacity: 0;
+    transform: translateX(calc(var(--discard-index) * 11px - 16px))
+      translateY(-18px) rotate(var(--discard-rotation));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .discard-stack.grouped .discard-card {
+    animation: none;
+  }
+}
+
 .card {
   position: relative;
   width: 82px;

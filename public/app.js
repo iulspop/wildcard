@@ -396,9 +396,25 @@ function renderGame(game) {
       </div>`;
     })
     .join("");
-  $("#discard").className = `card ${game.topDiscard.color}`;
-  $("#discard").innerHTML =
-    `<span class="card-corner top">${cardLabel(game.topDiscard)}</span><span class="card-face">${cardLabel(game.topDiscard)}</span><span class="card-corner bottom">${cardLabel(game.topDiscard)}</span>`;
+  const lastPlay = game.lastPlay,
+    groupedCards = lastPlay?.cards?.length > 1 ? lastPlay.cards : null,
+    displayedCards = groupedCards?.slice(-4) || [game.topDiscard],
+    lastPlayer = groupedCards
+      ? game.players.find((player) => player.id === lastPlay.playerId)
+      : null;
+  $("#discard-stack").classList.toggle("grouped", Boolean(groupedCards));
+  $("#discard-stack").innerHTML = displayedCards
+    .map((card, index) => {
+      const isTopCard = index === displayedCards.length - 1,
+        rotation = (index - (displayedCards.length - 1) / 2) * 3;
+      return `<div ${isTopCard ? 'id="discard"' : ""} class="card discard-card ${card.color}" style="--discard-index:${index};--discard-rotation:${rotation}deg" aria-label="${isTopCard ? "Top discard: " : "Played card: "}${escapeHTML(card.color)} ${escapeHTML(cardLabel(card))}"><span class="card-corner top">${cardLabel(card)}</span><span class="card-face">${cardLabel(card)}</span><span class="card-corner bottom">${cardLabel(card)}</span></div>`;
+    })
+    .join("");
+  const groupIndicator = $("#group-play-indicator");
+  groupIndicator.classList.toggle("hidden", !groupedCards);
+  groupIndicator.textContent = groupedCards
+    ? `${lastPlayer?.name || "A player"} played ${groupedCards.length} cards`
+    : "";
   $("#draw-count").textContent = `${game.drawPileCount} cards`;
   $("#hand-count").textContent = `${me?.cardCount || 0} cards`;
   const hand = me?.hand || [],
