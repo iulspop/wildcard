@@ -39,7 +39,7 @@ export type RoomCommand =
       displayName: string;
       reconnectHash: string;
       inviteHash?: string;
-      ownerUserId?: string;
+      authenticatedUserId?: string;
     })
   | (BaseCommand & {
       type: "reconnect";
@@ -94,6 +94,6 @@ export interface RoomStateResponse {
 
 export interface StoredRoomState {
   room: RoomMetadata;
-  seats: Array<RoomSeat & { reconnectHash: string }>;
+  seats: Array<RoomSeat & { reconnectHash: string; userId: string | null }>;
   game: GameState | null;
 }

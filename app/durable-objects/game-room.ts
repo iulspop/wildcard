@@ -12,6 +12,7 @@ import {
   type StoredRoomState,
 } from "./protocol.ts";
 import { ROOM_SCHEMA } from "./schema.ts";
+import { findSeatForAuthenticatedReclaim } from "./seat-identity.ts";
 
 type MetadataRow = {
   room_id: string;
@@ -26,6 +27,7 @@ type SeatRow = {
   player_id: string;
   display_name: string;
   reconnect_hash: string;
+  user_id: string | null;
   seat_index: number;
   connected: number;
 };
@@ -57,6 +59,11 @@ export class GameRoom implements DurableObject {
       .filter(Boolean)) {
       this.state.storage.sql.exec(statement);
     }
+    const seatColumns = this.state.storage.sql
+      .exec<{ name: string }>("PRAGMA table_info(seats)")
+      .toArray();
+    if (!seatColumns.some((column) => column.name === "user_id"))
+      this.state.storage.sql.exec("ALTER TABLE seats ADD COLUMN user_id TEXT");
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -204,16 +211,27 @@ export class GameRoom implements DurableObject {
       .getWebSockets()
       .filter((candidate) => candidate !== socket);
     if (attachment) {
-      const stillConnected = remainingSockets.some((candidate) => {
-        const candidateAttachment =
-          candidate.deserializeAttachment() as SocketAttachment | null;
-        return candidateAttachment?.playerId === attachment.playerId;
-      });
-      this.state.storage.sql.exec(
-        "UPDATE seats SET connected = ? WHERE player_id = ?",
-        stillConnected ? 1 : 0,
-        attachment.playerId,
-      );
+      const currentSeat = this.state.storage.sql
+        .exec<{ reconnect_hash: string }>(
+          "SELECT reconnect_hash FROM seats WHERE player_id = ?",
+          attachment.playerId,
+        )
+        .toArray()[0];
+      if (currentSeat?.reconnect_hash === attachment.reconnectHash) {
+        const stillConnected = remainingSockets.some((candidate) => {
+          const candidateAttachment =
+            candidate.deserializeAttachment() as SocketAttachment | null;
+          return (
+            candidateAttachment?.playerId === attachment.playerId &&
+            candidateAttachment.reconnectHash === attachment.reconnectHash
+          );
+        });
+        this.state.storage.sql.exec(
+          "UPDATE seats SET connected = ? WHERE player_id = ?",
+          stillConnected ? 1 : 0,
+          attachment.playerId,
+        );
+      }
     }
     if (remainingSockets.length === 0) {
       const row = this.metadataRow();
@@ -304,7 +322,11 @@ export class GameRoom implements DurableObject {
     }
   }
 
-  private async execute(command: RoomCommand): Promise<RoomStateResponse> {
+  private async execute(
+    command: RoomCommand,
+  ): Promise<
+    RoomStateResponse | { playerId: string; state: RoomStateResponse }
+  > {
     if (command.protocolVersion !== ROOM_PROTOCOL_VERSION)
       throw new RoomError(
         "protocol-mismatch",
@@ -388,10 +410,11 @@ export class GameRoom implements DurableObject {
   private join(
     stored: StoredRoomState,
     command: Extract<RoomCommand, { type: "join" }>,
-  ): RoomStateResponse {
+  ): { playerId: string; state: RoomStateResponse } {
     const row = this.metadataRow()!;
     const ownerAuthorized =
-      Boolean(command.ownerUserId) && command.ownerUserId === row.owner_user_id;
+      Boolean(command.authenticatedUserId) &&
+      command.authenticatedUserId === row.owner_user_id;
     if (
       row.invite_hash &&
       row.invite_hash !== command.inviteHash &&
@@ -402,61 +425,77 @@ export class GameRoom implements DurableObject {
         "The room invite credential is invalid",
         403,
       );
+    if (stored.seats.some((seat) => seat.playerId === command.playerId))
+      throw new RoomError("player-exists", "Player is already seated", 409);
+    const displayName = validateName(command.displayName, "Display name");
+    const namedSeat = stored.seats.find(
+      (seat) =>
+        seat.displayName.toLocaleLowerCase() ===
+        displayName.toLocaleLowerCase(),
+    );
+    const reclaimableSeat = findSeatForAuthenticatedReclaim(
+      stored.seats,
+      command.authenticatedUserId,
+      row.owner_user_id,
+      displayName,
+    );
+    if (reclaimableSeat) {
+      this.state.storage.sql.exec(
+        "UPDATE seats SET reconnect_hash = ?, user_id = ?, connected = 1, joined_at = ? WHERE player_id = ?",
+        command.reconnectHash,
+        command.authenticatedUserId ?? null,
+        Date.now(),
+        reclaimableSeat.playerId,
+      );
+      reclaimableSeat.reconnectHash = command.reconnectHash;
+      reclaimableSeat.userId = command.authenticatedUserId ?? null;
+      reclaimableSeat.connected = true;
+      for (const socket of this.state.getWebSockets()) {
+        const attachment = socket.deserializeAttachment() as
+          SocketAttachment | undefined;
+        if (attachment?.playerId === reclaimableSeat.playerId)
+          socket.close(4001, "Seat resumed from another device");
+      }
+      this.bumpVersion(stored);
+      return {
+        playerId: reclaimableSeat.playerId,
+        state: this.publicState(stored, reclaimableSeat.playerId),
+      };
+    }
+    if (namedSeat)
+      throw new RoomError("name-taken", "Display name is already in use", 409);
     if (stored.game?.phase === "playing")
       throw new RoomError(
         "game-in-progress",
         "The game has already started",
         409,
       );
-    if (stored.seats.some((seat) => seat.playerId === command.playerId))
-      throw new RoomError("player-exists", "Player is already seated", 409);
-    const displayName = validateName(command.displayName, "Display name");
-    const existingSeat = stored.seats.find(
-      (seat) =>
-        seat.displayName.toLocaleLowerCase() ===
-        displayName.toLocaleLowerCase(),
-    );
-    if (existingSeat) {
-      if (!ownerAuthorized || existingSeat.connected)
-        throw new RoomError(
-          "name-taken",
-          "Display name is already in use",
-          409,
-        );
-      this.state.storage.sql.exec(
-        "UPDATE seats SET player_id = ?, reconnect_hash = ?, connected = 1, joined_at = ? WHERE player_id = ?",
-        command.playerId,
-        command.reconnectHash,
-        Date.now(),
-        existingSeat.playerId,
-      );
-      existingSeat.playerId = command.playerId;
-      existingSeat.reconnectHash = command.reconnectHash;
-      existingSeat.connected = true;
-      this.bumpVersion(stored);
-      return this.publicState(stored, existingSeat.playerId);
-    }
     if (stored.seats.length >= 8)
       throw new RoomError("room-full", "The room is full", 409);
     const seat = {
       playerId: command.playerId,
       displayName,
       reconnectHash: command.reconnectHash,
+      userId: command.authenticatedUserId ?? null,
       seatIndex: stored.seats.length,
       connected: true,
     };
     const now = Date.now();
     this.state.storage.sql.exec(
-      "INSERT INTO seats (player_id, display_name, reconnect_hash, seat_index, connected, joined_at) VALUES (?, ?, ?, ?, 1, ?)",
+      "INSERT INTO seats (player_id, display_name, reconnect_hash, user_id, seat_index, connected, joined_at) VALUES (?, ?, ?, ?, ?, 1, ?)",
       seat.playerId,
       seat.displayName,
       seat.reconnectHash,
+      seat.userId,
       seat.seatIndex,
       now,
     );
     stored.seats.push(seat);
     this.bumpVersion(stored);
-    return this.publicState(stored, seat.playerId);
+    return {
+      playerId: seat.playerId,
+      state: this.publicState(stored, seat.playerId),
+    };
   }
 
   private start(
@@ -638,13 +677,14 @@ export class GameRoom implements DurableObject {
       throw new RoomError("not-initialized", "Room not initialized", 404);
     const seats = this.state.storage.sql
       .exec<SeatRow>(
-        "SELECT player_id, display_name, reconnect_hash, seat_index, connected FROM seats ORDER BY seat_index",
+        "SELECT player_id, display_name, reconnect_hash, user_id, seat_index, connected FROM seats ORDER BY seat_index",
       )
       .toArray()
       .map((seat) => ({
         playerId: seat.player_id,
         displayName: seat.display_name,
         reconnectHash: seat.reconnect_hash,
+        userId: seat.user_id,
         seatIndex: seat.seat_index,
         connected: Boolean(seat.connected),
       }));

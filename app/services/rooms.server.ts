@@ -1,6 +1,7 @@
 import {
   ROOM_PROTOCOL_VERSION,
   type RoomCommand,
+  type RoomStateResponse,
 } from "../durable-objects/protocol.ts";
 import type { WorkerEnv } from "./env.server.ts";
 import { getSessionUser } from "./session.server.ts";
@@ -149,15 +150,19 @@ async function joinRoom(
     ...(input.inviteCredential
       ? { inviteHash: await hashSecret(input.inviteCredential) }
       : {}),
-    ...(user ? { ownerUserId: user.id } : {}),
+    ...(user ? { authenticatedUserId: user.id } : {}),
   };
   const response = await stub.fetch("https://room.internal/command", {
     method: "POST",
     body: JSON.stringify(command),
   });
   if (!response.ok) return response;
+  const result = await response.json<{
+    playerId: string;
+    state: RoomStateResponse;
+  }>();
   return Response.json(
-    { playerId, reconnectToken, state: await response.json() },
+    { playerId: result.playerId, reconnectToken, state: result.state },
     { status: 201 },
   );
 }

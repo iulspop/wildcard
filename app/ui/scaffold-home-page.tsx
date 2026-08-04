@@ -11,21 +11,35 @@ export function HomePage() {
             WILDCARD
           </a>
           <div className="topbar-actions">
-            <label className="volume-control" htmlFor="volume">
-              <span aria-hidden="true">Sound</span>
-              <input
-                id="volume"
-                type="range"
-                min="0"
-                max="100"
-                step="5"
-                defaultValue="50"
-                aria-label="Sound volume"
-              />
-              <output id="volume-value" htmlFor="volume">
-                50%
-              </output>
-            </label>
+            <button id="end-game" className="topbar-stop hidden" type="button">
+              Stop game
+            </button>
+            <details id="volume-menu" className="volume-menu">
+              <summary aria-label="Adjust sound volume" title="Sound volume">
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  width="20"
+                  height="20"
+                >
+                  <path d="M4 9v6h4l5 4V5L8 9H4Zm12.5 3a4.5 4.5 0 0 0-2.25-3.9v7.8A4.5 4.5 0 0 0 16.5 12Zm-2.25-8.72v2.06a7.5 7.5 0 0 1 0 13.32v2.06a9.5 9.5 0 0 0 0-17.44Z" />
+                </svg>
+              </summary>
+              <label className="volume-popover" htmlFor="volume">
+                <output id="volume-value" htmlFor="volume">
+                  50%
+                </output>
+                <input
+                  id="volume"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="5"
+                  defaultValue="50"
+                  aria-label="Sound volume"
+                />
+              </label>
+            </details>
             <details id="account-menu" className="account-menu">
               <summary id="account-trigger">Sign in</summary>
               <section
@@ -258,9 +272,6 @@ export function HomePage() {
                 <button id="play" className="play-button" type="button">
                   Play selected cards
                 </button>
-                <button id="end-game" className="danger hidden" type="button">
-                  End game without results
-                </button>
                 <button
                   id="keep-drawn"
                   className="secondary hidden"
@@ -283,6 +294,50 @@ export function HomePage() {
             </section>
           </div>
         </section>
+        <dialog id="end-game-dialog" className="confirm-dialog">
+          <div className="confirm-dialog-icon" aria-hidden="true">
+            !
+          </div>
+          <div>
+            <span className="eyebrow">Stop current game</span>
+            <h2>Return everyone to the lobby?</h2>
+            <p>
+              This game will end immediately and no result will be recorded.
+              Players and room standings will remain.
+            </p>
+          </div>
+          <div className="confirm-dialog-actions">
+            <button id="cancel-end-game" className="secondary" type="button">
+              Keep playing
+            </button>
+            <button id="confirm-end-game" className="danger" type="button">
+              Stop game
+            </button>
+          </div>
+        </dialog>
+        <dialog id="kick-player-dialog" className="confirm-dialog">
+          <div className="confirm-dialog-icon" aria-hidden="true">
+            !
+          </div>
+          <div>
+            <span className="eyebrow">Remove player</span>
+            <h2>
+              Remove <span id="kick-player-name">this player</span>?
+            </h2>
+            <p>
+              They will leave the room, but may rejoin later with the same
+              display name.
+            </p>
+          </div>
+          <div className="confirm-dialog-actions">
+            <button id="cancel-kick-player" className="secondary" type="button">
+              Keep player
+            </button>
+            <button id="confirm-kick-player" className="danger" type="button">
+              Remove player
+            </button>
+          </div>
+        </dialog>
       </main>
     </Document>
   );

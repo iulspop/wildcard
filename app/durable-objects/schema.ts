@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS seats (
   player_id TEXT PRIMARY KEY,
   display_name TEXT NOT NULL,
   reconnect_hash TEXT NOT NULL UNIQUE,
+  user_id TEXT,
   seat_index INTEGER NOT NULL UNIQUE,
   connected INTEGER NOT NULL DEFAULT 0,
   joined_at INTEGER NOT NULL

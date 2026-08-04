@@ -66,10 +66,12 @@ let sessionUser = null,
     Math.max(0, Number(localStorage.getItem("wildcard:volume") ?? 50) / 100),
   ),
   audioContext = null,
+  audioOutput = null,
   previousTurn = null,
   previousWinner = null,
   previousUnoClaimId = null,
   pendingUnoClaimId = null,
+  pendingKickPlayerId = null,
   unoTimer = null,
   messageTimer = null,
   roomInviteCredential = roomId ? inviteFromHash() : undefined;
@@ -290,7 +292,7 @@ function render() {
   $("#seats").innerHTML = state.seats
     .map(
       (seat) =>
-        `<li class="seat"><span><span class="dot ${seat.connected ? "online" : ""}"></span>${escapeHTML(seat.displayName)}</span><span class="seat-actions">${seat.playerId === credentials?.playerId ? "You" : `Seat ${seat.seatIndex + 1}${isHost && !state.game ? ` <button class="kick-button" type="button" data-player-id="${escapeHTML(seat.playerId)}" aria-label="Remove ${escapeHTML(seat.displayName)} from room">Remove</button>` : ""}`}</span></li>`,
+        `<li class="seat"><span><span class="dot ${seat.connected ? "online" : ""}"></span>${escapeHTML(seat.displayName)}</span><span class="seat-actions">${seat.playerId === credentials?.playerId ? "You" : `Seat ${seat.seatIndex + 1}${isHost && !state.game ? ` <button class="kick-button" type="button" data-player-id="${escapeHTML(seat.playerId)}" data-player-name="${escapeHTML(seat.displayName)}" aria-label="Remove ${escapeHTML(seat.displayName)} from room">Remove</button>` : ""}`}</span></li>`,
     )
     .join("");
   $("#start").disabled = !isHost || state.seats.length < 2 || !!state.game;
@@ -492,13 +494,29 @@ async function returnToLobby() {
 function kickPlayer(playerId) {
   send("kick", { targetPlayerId: playerId });
 }
+function showKickPlayerDialog(playerId, playerName) {
+  pendingKickPlayerId = playerId;
+  $("#kick-player-name").textContent = playerName;
+  $("#kick-player-dialog").showModal();
+}
+function cancelKickPlayer() {
+  pendingKickPlayerId = null;
+  $("#kick-player-dialog").close();
+}
+function confirmKickPlayer() {
+  const playerId = pendingKickPlayerId;
+  cancelKickPlayer();
+  if (playerId) kickPlayer(playerId);
+}
 function endGame() {
-  if (
-    window.confirm(
-      "End this game and return everyone to the lobby? No result will be recorded.",
-    )
-  )
-    send("end-game");
+  $("#end-game-dialog").showModal();
+}
+function cancelEndGame() {
+  $("#end-game-dialog").close();
+}
+function confirmEndGame() {
+  $("#end-game-dialog").close();
+  send("end-game");
 }
 async function play() {
   unlockAudio();
@@ -554,8 +572,18 @@ function sendUno(type) {
   });
 }
 function unlockAudio() {
-  if (!window.AudioContext) return null;
-  audioContext ||= new window.AudioContext();
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return null;
+  audioContext ||= new AudioContext();
+  if (!audioOutput) {
+    audioOutput = audioContext.createDynamicsCompressor();
+    audioOutput.threshold.value = -12;
+    audioOutput.knee.value = 18;
+    audioOutput.ratio.value = 6;
+    audioOutput.attack.value = 0.003;
+    audioOutput.release.value = 0.18;
+    audioOutput.connect(audioContext.destination);
+  }
   if (audioContext.state === "suspended") audioContext.resume();
   return audioContext;
 }
@@ -564,34 +592,60 @@ function playSound(type) {
   const context = unlockAudio();
   if (!context) return;
   const sounds = {
-    start: [392, 0.08, 0],
-    play: [660, 0.09, 0],
-    draw: [220, 0.12, 0],
-    turn: [520, 0.12, 0],
-    lose: [196, 0.24, -70],
+    start: [
+      [523, 0, 0.18, 0.65, "sine"],
+      [659, 0.08, 0.2, 0.72, "sine"],
+      [784, 0.16, 0.28, 0.8, "triangle"],
+    ],
+    play: [
+      [659, 0, 0.09, 0.55, "triangle"],
+      [988, 0.055, 0.14, 0.7, "sine"],
+    ],
+    draw: [
+      [294, 0, 0.18, 0.5, "triangle", -55],
+      [220, 0.07, 0.2, 0.42, "sine", -35],
+    ],
+    turn: [
+      [784, 0, 0.16, 0.72, "sine"],
+      [1047, 0.09, 0.22, 0.9, "triangle"],
+      [1319, 0.19, 0.28, 0.8, "sine"],
+    ],
+    win: [
+      [523, 0, 0.22, 0.65, "sine"],
+      [659, 0.1, 0.24, 0.72, "triangle"],
+      [784, 0.2, 0.26, 0.8, "sine"],
+      [1047, 0.3, 0.42, 0.95, "triangle"],
+    ],
+    lose: [
+      [392, 0, 0.24, 0.55, "sine"],
+      [311, 0.12, 0.28, 0.5, "triangle"],
+      [262, 0.25, 0.36, 0.45, "sine"],
+    ],
   };
-  const [frequency, duration, slide] = sounds[type] || [784, 0.12, 90];
-  const notes = type === "win" ? [523, 659, 784] : [frequency];
-  notes.forEach((note, index) => {
+  const notes = sounds[type] || [[880, 0, 0.16, 0.65, "sine"]];
+  notes.forEach(([frequency, delay, duration, level, wave, slide = 0]) => {
     const oscillator = context.createOscillator();
     const gain = context.createGain();
-    const startAt = context.currentTime + index * 0.1;
-    oscillator.type = type === "draw" ? "triangle" : "sine";
-    oscillator.frequency.setValueAtTime(note, startAt);
+    const startAt = context.currentTime + delay;
+    oscillator.type = wave;
+    oscillator.frequency.setValueAtTime(frequency, startAt);
     if (slide)
-      oscillator.frequency.linearRampToValueAtTime(
-        note + slide,
+      oscillator.frequency.exponentialRampToValueAtTime(
+        frequency + slide,
         startAt + duration,
       );
     gain.gain.setValueAtTime(0.0001, startAt);
     gain.gain.exponentialRampToValueAtTime(
-      Math.max(0.0001, soundVolume * 0.5),
-      startAt + 0.015,
+      Math.max(
+        0.0001,
+        soundVolume * 2.8 * level * (1 + Math.max(0, soundVolume - 0.5) * 2),
+      ),
+      startAt + 0.018,
     );
     gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
-    oscillator.connect(gain).connect(context.destination);
+    oscillator.connect(gain).connect(audioOutput);
     oscillator.start(startAt);
-    oscillator.stop(startAt + duration);
+    oscillator.stop(startAt + duration + 0.02);
   });
 }
 function escapeHTML(value) {
@@ -619,15 +673,20 @@ bind("#start", "click", start);
 bind("#restart", "click", start);
 bind("#return-lobby", "click", returnToLobby);
 bind("#end-game", "click", endGame);
+bind("#cancel-end-game", "click", cancelEndGame);
+bind("#confirm-end-game", "click", confirmEndGame);
+bind("#end-game-dialog", "click", (event) => {
+  if (event.target === event.currentTarget) cancelEndGame();
+});
+bind("#cancel-kick-player", "click", cancelKickPlayer);
+bind("#confirm-kick-player", "click", confirmKickPlayer);
+bind("#kick-player-dialog", "click", (event) => {
+  if (event.target === event.currentTarget) cancelKickPlayer();
+});
 bind("#seats", "click", (event) => {
   const button = event.target.closest(".kick-button");
-  if (
-    button &&
-    window.confirm(
-      "Remove this player from the room? They may join again later.",
-    )
-  )
-    kickPlayer(button.dataset.playerId);
+  if (button)
+    showKickPlayerDialog(button.dataset.playerId, button.dataset.playerName);
 });
 bind("#play", "click", play);
 bind("#draw", "click", draw);
