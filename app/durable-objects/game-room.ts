@@ -116,6 +116,24 @@ export class GameRoom implements DurableObject {
         );
       }
     }
+    if (request.method === "DELETE" && url.pathname === "/room") {
+      return this.state.blockConcurrencyWhile(async () => {
+        const ownerUserId = request.headers.get("X-Wildcard-Owner");
+        const metadata = this.metadataRow();
+        if (!metadata)
+          return Response.json({ error: "Room not found" }, { status: 404 });
+        if (!metadata.persistent || metadata.owner_user_id !== ownerUserId)
+          return Response.json(
+            { error: "Room owner required" },
+            { status: 403 },
+          );
+
+        for (const socket of this.state.getWebSockets())
+          socket.close(4004, "Room deleted by owner");
+        await this.state.storage.deleteAll();
+        return Response.json({ deleted: true });
+      });
+    }
     return Response.json({ error: "Not found" }, { status: 404 });
   }
 

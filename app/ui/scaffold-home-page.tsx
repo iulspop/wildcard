@@ -338,6 +338,29 @@ export function HomePage() {
             </button>
           </div>
         </dialog>
+        <dialog id="delete-room-dialog" className="confirm-dialog">
+          <div className="confirm-dialog-icon" aria-hidden="true">
+            !
+          </div>
+          <div>
+            <span className="eyebrow">Delete persistent room</span>
+            <h2>
+              Delete <span id="delete-room-name">this room</span>?
+            </h2>
+            <p>
+              The room, its player seats, game state, and all-time standings
+              will be permanently deleted. This cannot be undone.
+            </p>
+          </div>
+          <div className="confirm-dialog-actions">
+            <button id="cancel-delete-room" className="secondary" type="button">
+              Keep room
+            </button>
+            <button id="confirm-delete-room" className="danger" type="button">
+              Delete room
+            </button>
+          </div>
+        </dialog>
       </main>
     </Document>
   );

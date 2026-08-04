@@ -18,6 +18,10 @@ export async function handleRoomRequest(
   if (url.pathname === "/api/rooms" && request.method === "GET")
     return listOwnedRooms(request, env);
 
+  const roomMatch = /^\/api\/rooms\/([A-Za-z0-9_-]+)$/.exec(url.pathname);
+  if (roomMatch && request.method === "DELETE")
+    return deleteOwnedRoom(request, env, roomMatch[1]);
+
   const match =
     /^\/api\/rooms\/([A-Za-z0-9_-]+)\/(join|command|state|socket)$/.exec(
       url.pathname,
@@ -74,6 +78,38 @@ async function listOwnedRooms(request: Request, env: WorkerEnv) {
     }),
   );
   return Response.json({ rooms: rooms.filter((room) => room !== null) });
+}
+
+async function deleteOwnedRoom(
+  request: Request,
+  env: WorkerEnv,
+  roomId: string,
+) {
+  const user = await getSessionUser(request, env.AUTH_DB, env.SESSION_SECRET);
+  if (!user)
+    return Response.json({ error: "Authentication required" }, { status: 401 });
+
+  const ownedRoom = await env.AUTH_DB.prepare(
+    "SELECT room_id FROM owned_rooms WHERE room_id = ? AND owner_user_id = ?",
+  )
+    .bind(roomId, user.id)
+    .first<{ room_id: string }>();
+  if (!ownedRoom)
+    return Response.json({ error: "Room not found" }, { status: 404 });
+
+  const stub = env.GAME_ROOMS.get(env.GAME_ROOMS.idFromName(roomId));
+  const response = await stub.fetch("https://room.internal/room", {
+    method: "DELETE",
+    headers: { "X-Wildcard-Owner": user.id },
+  });
+  if (!response.ok) return response;
+
+  await env.AUTH_DB.prepare(
+    "DELETE FROM owned_rooms WHERE room_id = ? AND owner_user_id = ?",
+  )
+    .bind(roomId, user.id)
+    .run();
+  return Response.json({ deleted: true, roomId });
 }
 
 async function createRoom(request: Request, env: WorkerEnv) {

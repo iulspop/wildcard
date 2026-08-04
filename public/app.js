@@ -72,6 +72,7 @@ let sessionUser = null,
   previousUnoClaimId = null,
   pendingUnoClaimId = null,
   pendingKickPlayerId = null,
+  pendingDeleteRoom = null,
   unoTimer = null,
   messageTimer = null,
   roomInviteCredential = roomId ? inviteFromHash() : undefined;
@@ -116,7 +117,7 @@ async function loadOwnedRooms() {
     ? data.rooms
         .map(
           (room) =>
-            `<li><a href="/rooms/${encodeURIComponent(room.roomId)}"><strong>${escapeHTML(room.name)}</strong><span>${room.protected ? "Protected" : "Open"} · ${room.standingsCount} ranked players</span></a></li>`,
+            `<li><a href="/rooms/${encodeURIComponent(room.roomId)}"><strong>${escapeHTML(room.name)}</strong><span>${room.protected ? "Protected" : "Open"} · ${room.standingsCount} ranked players</span></a><button class="owned-room-delete" type="button" data-room-id="${room.roomId}" data-room-name="${escapeHTML(room.name)}" aria-label="Delete ${escapeHTML(room.name)}">Delete</button></li>`,
         )
         .join("")
     : '<li class="empty">No persistent rooms yet.</li>';
@@ -508,6 +509,31 @@ function confirmKickPlayer() {
   cancelKickPlayer();
   if (playerId) kickPlayer(playerId);
 }
+function showDeleteRoomDialog(roomIdToDelete, roomName) {
+  pendingDeleteRoom = { roomId: roomIdToDelete, name: roomName };
+  $("#delete-room-name").textContent = roomName;
+  $("#delete-room-dialog").showModal();
+}
+function cancelDeleteRoom() {
+  pendingDeleteRoom = null;
+  $("#delete-room-dialog").close();
+}
+async function confirmDeleteRoom() {
+  const room = pendingDeleteRoom;
+  cancelDeleteRoom();
+  if (!room) return;
+  await api(`/api/rooms/${encodeURIComponent(room.roomId)}`, {
+    method: "DELETE",
+  });
+  localStorage.removeItem(`wildcard:${room.roomId}`);
+  sessionStorage.removeItem(`wildcard:invite:${room.roomId}`);
+  message(`${room.name} deleted.`);
+  if (roomId === room.roomId) {
+    location.href = "/";
+    return;
+  }
+  await loadOwnedRooms();
+}
 function endGame() {
   $("#end-game-dialog").showModal();
 }
@@ -694,6 +720,17 @@ bind("#cancel-kick-player", "click", cancelKickPlayer);
 bind("#confirm-kick-player", "click", confirmKickPlayer);
 bind("#kick-player-dialog", "click", (event) => {
   if (event.target === event.currentTarget) cancelKickPlayer();
+});
+bind("#cancel-delete-room", "click", cancelDeleteRoom);
+bind("#confirm-delete-room", "click", confirmDeleteRoom);
+bind("#delete-room-dialog", "click", (event) => {
+  if (event.target === event.currentTarget) cancelDeleteRoom();
+});
+bind("#delete-room-dialog", "cancel", cancelDeleteRoom);
+bind("#owned-room-list", "click", (event) => {
+  const button = event.target.closest(".owned-room-delete");
+  if (button)
+    showDeleteRoomDialog(button.dataset.roomId, button.dataset.roomName);
 });
 bind("#seats", "click", (event) => {
   const button = event.target.closest(".kick-button");

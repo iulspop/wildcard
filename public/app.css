@@ -1060,6 +1060,13 @@ button.card.selected {
   border-bottom: 1px solid var(--line);
 }
 
+.owned-room-list li:not(.empty) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 8px;
+}
+
 .owned-room-list a,
 .owned-room-list .empty {
   display: grid;
@@ -1079,6 +1086,20 @@ button.card.selected {
 .owned-room-list .empty {
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.owned-room-delete {
+  align-self: stretch;
+  padding-inline: 12px;
+  border-color: #ff6b6b55;
+  background: #ff4d4d14;
+  color: #ff9c9c;
+  font-size: 0.78rem;
+}
+
+.owned-room-delete:hover {
+  border-color: #ff6b6b;
+  background: #ff4d4d25;
 }
 
 @media (min-width: 760px) {
