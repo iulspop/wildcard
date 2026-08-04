@@ -390,8 +390,6 @@ export class GameRoom implements DurableObject {
       command.inviteHash ?? null,
       now,
     );
-    if (!command.persistent)
-      await this.state.storage.setAlarm(now + this.temporaryRoomTtlMs());
     return this.publicState({
       room: {
         roomId: command.roomId,

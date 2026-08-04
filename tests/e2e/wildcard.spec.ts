@@ -221,6 +221,7 @@ test("home is usable on desktop and mobile", async ({ page }) => {
 
 test("passkey users can create and reopen persistent rooms", async ({
   page,
+  request,
 }) => {
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("WebAuthn.enable");
@@ -255,16 +256,16 @@ test("passkey users can create and reopen persistent rooms", async ({
   const roomUrl = new URL(page.url());
   const roomId = roomUrl.pathname.split("/").at(-1)!;
   const inviteCredential = roomUrl.hash.replace("#invite=", "");
-  const alice = await join(page.request, roomId, "Alice", inviteCredential);
-  const bob = await join(page.request, roomId, "Bob", inviteCredential);
-  const start = await page.request.post(`/api/rooms/${roomId}/command`, {
+  const alice = await join(request, roomId, "Alice", inviteCredential);
+  const bob = await join(request, roomId, "Bob", inviteCredential);
+  const start = await request.post(`/api/rooms/${roomId}/command`, {
     data: {
       ...alice,
       command: { protocolVersion: 1, type: "start" },
     },
   });
   expect(start.ok()).toBeTruthy();
-  const finished = await finishGame(page.request, roomId, [alice, bob]);
+  const finished = await finishGame(request, roomId, [alice, bob]);
   expect(finished.game.winnerId).toBeTruthy();
   expect(finished.game.unoClaim).toBeNull();
   expect(finished.standings).toEqual(
@@ -273,7 +274,7 @@ test("passkey users can create and reopen persistent rooms", async ({
       expect.objectContaining({ games: 1, wins: 0, losses: 1 }),
     ]),
   );
-  const lobby = await page.request.post(`/api/rooms/${roomId}/command`, {
+  const lobby = await request.post(`/api/rooms/${roomId}/command`, {
     data: {
       ...alice,
       command: { protocolVersion: 1, type: "lobby" },
@@ -281,7 +282,7 @@ test("passkey users can create and reopen persistent rooms", async ({
   });
   expect(lobby.ok()).toBeTruthy();
   expect((await lobby.json()).game).toBeNull();
-  const restart = await page.request.post(`/api/rooms/${roomId}/command`, {
+  const restart = await request.post(`/api/rooms/${roomId}/command`, {
     data: {
       ...alice,
       command: { protocolVersion: 1, type: "start" },
@@ -289,7 +290,7 @@ test("passkey users can create and reopen persistent rooms", async ({
   });
   expect(restart.ok()).toBeTruthy();
   expect((await restart.json()).game.phase).toBe("playing");
-  const endGame = await page.request.post(`/api/rooms/${roomId}/command`, {
+  const endGame = await request.post(`/api/rooms/${roomId}/command`, {
     data: {
       ...alice,
       command: { protocolVersion: 1, type: "end-game" },
