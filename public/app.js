@@ -82,6 +82,11 @@ async function loadSession() {
   const data = await api("/api/auth/session");
   sessionUser = data.user;
   $("#auth-name").textContent = sessionUser ? sessionUser.displayName : "Guest";
+  $("#auth-name").classList.toggle("hidden", !sessionUser);
+  $("#account-trigger").textContent = sessionUser
+    ? sessionUser.displayName
+    : "Sign in";
+  $("#auth-controls").classList.toggle("hidden", Boolean(sessionUser));
   $("#logout").classList.toggle("hidden", !sessionUser);
   $("#persistent-wrap").classList.toggle("hidden", !sessionUser);
   await loadOwnedRooms();
@@ -171,7 +176,6 @@ async function createRoom(event) {
       body: JSON.stringify({
         name: form.get("name"),
         persistent: form.get("persistent") === "on",
-        protected: form.get("protected") === "on",
       }),
     });
   location.href = data.inviteUrl;

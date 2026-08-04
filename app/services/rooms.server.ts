@@ -79,7 +79,6 @@ async function createRoom(request: Request, env: WorkerEnv) {
   const input = await readJson<{
     name?: string;
     persistent?: boolean;
-    protected?: boolean;
   }>(request);
   const user = await getSessionUser(request, env.AUTH_DB, env.SESSION_SECRET);
   if (input.persistent && !user)
@@ -89,7 +88,7 @@ async function createRoom(request: Request, env: WorkerEnv) {
     );
 
   const roomId = randomToken(18);
-  const inviteCredential = input.protected ? randomToken(32) : null;
+  const inviteCredential = randomToken(32);
   const command: RoomCommand = {
     protocolVersion: ROOM_PROTOCOL_VERSION,
     type: "create",
@@ -97,9 +96,7 @@ async function createRoom(request: Request, env: WorkerEnv) {
     name: input.name ?? "Wildcard room",
     persistent: Boolean(input.persistent),
     ...(user ? { ownerUserId: user.id } : {}),
-    ...(inviteCredential
-      ? { inviteHash: await hashSecret(inviteCredential) }
-      : {}),
+    inviteHash: await hashSecret(inviteCredential),
   };
   const stub = env.GAME_ROOMS.get(env.GAME_ROOMS.idFromName(roomId));
   if (user && input.persistent) {
@@ -125,7 +122,7 @@ async function createRoom(request: Request, env: WorkerEnv) {
   return Response.json(
     {
       roomId,
-      inviteUrl: `${new URL(request.url).origin}/rooms/${roomId}${inviteCredential ? `#invite=${inviteCredential}` : ""}`,
+      inviteUrl: `${new URL(request.url).origin}/rooms/${roomId}#invite=${inviteCredential}`,
     },
     { status: 201 },
   );

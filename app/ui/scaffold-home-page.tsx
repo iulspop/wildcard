@@ -10,12 +10,51 @@ export function HomePage() {
           <a className="brand" href="/">
             WILDCARD
           </a>
-          <div className="user">
-            <span id="auth-name">Guest</span>
-            <button id="logout" className="secondary hidden" type="button">
-              Sign out
-            </button>
-          </div>
+          <details id="account-menu" className="account-menu">
+            <summary id="account-trigger">Sign in</summary>
+            <section
+              className="account-popover stack"
+              aria-labelledby="account-title"
+            >
+              <div className="account-heading">
+                <div>
+                  <span className="eyebrow">Account</span>
+                  <h2 id="account-title">Play across visits</h2>
+                </div>
+                <span id="auth-name" className="hidden">
+                  Guest
+                </span>
+              </div>
+              <div id="auth-controls" className="stack">
+                <p>
+                  Optional. Use a passkey to keep rooms and all-time standings.
+                </p>
+                <label>
+                  Display name
+                  <input
+                    id="auth-display-name"
+                    maxLength={40}
+                    autoComplete="nickname"
+                  />
+                </label>
+                <div className="row">
+                  <button id="register" type="button">
+                    Create passkey
+                  </button>
+                  <button id="login" className="secondary" type="button">
+                    Sign in
+                  </button>
+                </div>
+              </div>
+              <button id="logout" className="secondary hidden" type="button">
+                Sign out
+              </button>
+              <div id="owned-rooms" className="hidden stack">
+                <h3>Your rooms</h3>
+                <ul id="owned-room-list" className="owned-room-list" />
+              </div>
+            </section>
+          </details>
         </header>
         <div
           id="status"
@@ -24,67 +63,32 @@ export function HomePage() {
           aria-live="polite"
         />
         <section id="home" className="hero">
-          <div>
+          <div className="hero-copy">
             <p className="brand">REAL-TIME CARD ROOMS</p>
             <h1>Play your hand.</h1>
             <p>
-              Create a room, invite up to seven friends, and settle the score.
-              No account required.
+              Start a private table, share one link, and play with up to seven
+              friends. No account required.
             </p>
           </div>
-          <div className="grid">
-            <form id="create-form" className="panel stack">
-              <h2>Create a room</h2>
-              <label>
-                Room name
-                <input name="name" maxLength={60} value="Friday night" />
-              </label>
-              <label className="row">
-                <input
-                  name="protected"
-                  type="checkbox"
-                  style={{ width: "auto" }}
-                />{" "}
-                Protect invite
-              </label>
-              <label id="persistent-wrap" className="row hidden">
-                <input
-                  name="persistent"
-                  type="checkbox"
-                  style={{ width: "auto" }}
-                />{" "}
-                Keep room and standings
-              </label>
-              <button type="submit">Create room</button>
-            </form>
-            <section className="panel stack" aria-labelledby="passkey-title">
-              <h2 id="passkey-title">Your passkey</h2>
-              <p>
-                Optional. Sign in to own persistent rooms and keep all-time
-                standings.
-              </p>
-              <label>
-                Display name
-                <input
-                  id="auth-display-name"
-                  maxLength={40}
-                  autoComplete="nickname"
-                />
-              </label>
-              <div className="row">
-                <button id="register" type="button">
-                  Create passkey
-                </button>
-                <button id="login" className="secondary" type="button">
-                  Sign in
-                </button>
-              </div>
-              <div id="owned-rooms" className="hidden stack">
-                <h3>Your persistent rooms</h3>
-                <ul id="owned-room-list" className="owned-room-list" />
-              </div>
-            </section>
-          </div>
+          <form id="create-form" className="create-card stack">
+            <label>
+              Name your room
+              <input name="name" maxLength={60} value="Friday night" />
+            </label>
+            <label id="persistent-wrap" className="row hidden">
+              <input
+                name="persistent"
+                type="checkbox"
+                style={{ width: "auto" }}
+              />{" "}
+              Keep this room and its standings
+            </label>
+            <button type="submit">Create private room</button>
+            <small>
+              Its secret invite is included automatically in the link.
+            </small>
+          </form>
         </section>
         <section id="room-page" className="hidden stack">
           <div id="join-panel" className="panel stack">

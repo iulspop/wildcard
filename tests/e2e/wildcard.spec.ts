@@ -18,21 +18,26 @@ type GameState = {
   winnerId: string | null;
 };
 
-async function createOpenRoom(request: APIRequestContext, name: string) {
+async function createRoom(request: APIRequestContext, name: string) {
   const response = await request.post("/api/rooms", {
-    data: { name, protected: false, persistent: false },
+    data: { name, persistent: false },
   });
   expect(response.status()).toBe(201);
-  return (await response.json()) as { roomId: string; inviteUrl: string };
+  const room = (await response.json()) as { roomId: string; inviteUrl: string };
+  return {
+    ...room,
+    inviteCredential: new URL(room.inviteUrl).hash.replace("#invite=", ""),
+  };
 }
 
 async function join(
   request: APIRequestContext,
   roomId: string,
   displayName: string,
+  inviteCredential?: string,
 ) {
   const response = await request.post(`/api/rooms/${roomId}/join`, {
-    data: { displayName },
+    data: { displayName, inviteCredential },
   });
   expect(response.status()).toBe(201);
   return (await response.json()) as JoinedPlayer & { state: unknown };
@@ -166,10 +171,10 @@ test("home is usable on desktop and mobile", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Play your hand." }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Create room" })).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Create passkey" }),
+    page.getByRole("button", { name: "Create private room" }),
   ).toBeVisible();
+  await expect(page.locator("#account-trigger")).toHaveText("Sign in");
 });
 
 test("passkey users can create and reopen persistent rooms", async ({
@@ -189,6 +194,7 @@ test("passkey users can create and reopen persistent rooms", async ({
   });
 
   await page.goto("/");
+  await page.locator("#account-trigger").click();
   await page
     .getByRole("textbox", { name: /^Display name$/ })
     .fill("Test Player");
@@ -200,14 +206,15 @@ test("passkey users can create and reopen persistent rooms", async ({
   await expect(page.locator("#status")).toBeVisible();
   await expect(page.locator("#status")).toBeHidden({ timeout: 5_000 });
 
-  await page.getByLabel("Room name").fill("Permanent rivals");
-  await page.getByLabel("Keep room and standings").check();
-  await page.getByRole("button", { name: "Create room" }).click();
-  await expect(page).toHaveURL(/\/rooms\/[A-Za-z0-9_-]+$/);
-  const roomUrl = page.url();
-  const roomId = new URL(roomUrl).pathname.split("/").at(-1)!;
-  const alice = await join(page.request, roomId, "Alice");
-  const bob = await join(page.request, roomId, "Bob");
+  await page.getByLabel("Name your room").fill("Permanent rivals");
+  await page.getByLabel("Keep this room and its standings").check();
+  await page.getByRole("button", { name: "Create private room" }).click();
+  await expect(page).toHaveURL(/\/rooms\/[A-Za-z0-9_-]+#invite=.+$/);
+  const roomUrl = new URL(page.url());
+  const roomId = roomUrl.pathname.split("/").at(-1)!;
+  const inviteCredential = roomUrl.hash.replace("#invite=", "");
+  const alice = await join(page.request, roomId, "Alice", inviteCredential);
+  const bob = await join(page.request, roomId, "Bob", inviteCredential);
   const start = await page.request.post(`/api/rooms/${roomId}/command`, {
     data: {
       ...alice,
@@ -227,11 +234,12 @@ test("passkey users can create and reopen persistent rooms", async ({
   await page.goto("/");
   await expect(page.locator("#owned-rooms")).toContainText("Permanent rivals");
   await page.getByRole("link", { name: /Permanent rivals/ }).click();
-  await expect(page).toHaveURL(roomUrl);
+  await expect(page).toHaveURL((url) => url.pathname === roomUrl.pathname);
 
   await page.goto("/");
+  await page.getByText("Test Player", { exact: true }).click();
   await page.getByRole("button", { name: "Sign out" }).click();
-  await expect(page.locator("#auth-name")).toHaveText("Guest");
+  await expect(page.locator("#account-trigger")).toHaveText("Sign in");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.locator("#auth-name")).toHaveText("Test Player");
   await expect(page.locator("#owned-rooms")).toContainText("Permanent rivals");
@@ -347,14 +355,17 @@ test("invalid protected-room credentials are rejected", async ({ request }) => {
 test("eight players can join while unauthorized commands are rejected", async ({
   request,
 }) => {
-  const room = await createOpenRoom(request, "Eight player table");
+  const room = await createRoom(request, "Eight player table");
   const players = await Promise.all(
     Array.from({ length: 8 }, (_, index) =>
-      join(request, room.roomId, `Player ${index + 1}`),
+      join(request, room.roomId, `Player ${index + 1}`, room.inviteCredential),
     ),
   );
   const ninth = await request.post(`/api/rooms/${room.roomId}/join`, {
-    data: { displayName: "Player 9" },
+    data: {
+      displayName: "Player 9",
+      inviteCredential: room.inviteCredential,
+    },
   });
   expect(ninth.status()).toBe(409);
 
@@ -392,9 +403,14 @@ test("eight players can join while unauthorized commands are rejected", async ({
 test("hibernating sockets reconnect with recipient-safe snapshots", async ({
   request,
 }) => {
-  const room = await createOpenRoom(request, "Reconnect table");
-  const alice = await join(request, room.roomId, "Alice");
-  const bob = await join(request, room.roomId, "Bob");
+  const room = await createRoom(request, "Reconnect table");
+  const alice = await join(
+    request,
+    room.roomId,
+    "Alice",
+    room.inviteCredential,
+  );
+  const bob = await join(request, room.roomId, "Bob", room.inviteCredential);
   const aliceConnection = await openRoomSocket(room.roomId, alice);
   const bobConnection = await openRoomSocket(room.roomId, bob);
 
@@ -435,8 +451,13 @@ test("hibernating sockets reconnect with recipient-safe snapshots", async ({
 test("temporary rooms expire after their final socket disconnect", async ({
   request,
 }) => {
-  const room = await createOpenRoom(request, "Expiring table");
-  const alice = await join(request, room.roomId, "Alice");
+  const room = await createRoom(request, "Expiring table");
+  const alice = await join(
+    request,
+    room.roomId,
+    "Alice",
+    room.inviteCredential,
+  );
   const connection = await openRoomSocket(room.roomId, alice);
   await closeSocket(connection.socket);
 
