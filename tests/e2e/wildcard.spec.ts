@@ -289,14 +289,25 @@ test("passkey users can create and reopen persistent rooms", async ({
   });
   expect(restart.ok()).toBeTruthy();
   expect((await restart.json()).game.phase).toBe("playing");
+  const endGame = await page.request.post(`/api/rooms/${roomId}/command`, {
+    data: {
+      ...alice,
+      command: { protocolVersion: 1, type: "end-game" },
+    },
+  });
+  expect(endGame.ok()).toBeTruthy();
 
   await page.goto("/");
   await expect(page.locator("#owned-rooms")).toContainText("Permanent rivals");
   await page.goto(roomUrl.pathname);
   await expect(page).toHaveURL((url) => url.pathname === roomUrl.pathname);
+  await expect(page.getByLabel("Your display name")).toHaveValue("Test Player");
+  await page.getByRole("button", { name: "Take a seat" }).click();
+  await expect(page.locator("#room-panel")).toBeVisible();
+  await expect(page.locator("#seats")).toContainText("Test Player");
 
   await page.goto("/");
-  await page.getByText("Test Player", { exact: true }).click();
+  await page.locator("#account-trigger").click();
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page.locator("#account-trigger")).toHaveText("Sign in");
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -435,7 +446,8 @@ test("eight players can join while unauthorized commands are rejected", async ({
       command: { protocolVersion: 1, type: "start" },
     },
   });
-  expect(forged.status()).toBe(403);
+  const forgedBody = await forged.json();
+  expect(forged.status(), JSON.stringify(forgedBody)).toBe(403);
 
   const nonHost = await request.post(`/api/rooms/${room.roomId}/command`, {
     data: {

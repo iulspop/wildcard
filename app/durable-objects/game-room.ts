@@ -52,13 +52,11 @@ export class GameRoom implements DurableObject {
     private readonly env: WorkerEnv,
   ) {
     void this.env;
-    this.state.blockConcurrencyWhile(async () => {
-      for (const statement of ROOM_SCHEMA.split(";")
-        .map((sql) => sql.trim())
-        .filter(Boolean)) {
-        this.state.storage.sql.exec(statement);
-      }
-    });
+    for (const statement of ROOM_SCHEMA.split(";")
+      .map((sql) => sql.trim())
+      .filter(Boolean)) {
+      this.state.storage.sql.exec(statement);
+    }
   }
 
   async fetch(request: Request): Promise<Response> {
