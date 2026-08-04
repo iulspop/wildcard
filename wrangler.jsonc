@@ -27,14 +27,14 @@
     {
       "binding": "AUTH_DB",
       "database_name": "wildcard-auth",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "5cf1044c-890e-477d-8b25-411c515b4037",
       "migrations_dir": "migrations",
     },
   ],
   "vars": {
-    "PASSKEY_RP_ID": "localhost",
+    "PASSKEY_RP_ID": "wildcard.polyanova.workers.dev",
     "PASSKEY_RP_NAME": "Wildcard",
-    "PASSKEY_ORIGIN": "http://localhost:8787",
+    "PASSKEY_ORIGIN": "https://wildcard.polyanova.workers.dev",
     "TEMPORARY_ROOM_TTL_MS": "3600000",
   },
   "env": {
