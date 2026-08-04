@@ -402,8 +402,11 @@ function renderGame(game) {
     lastPlayer = groupedCards
       ? game.players.find((player) => player.id === lastPlay.playerId)
       : null;
-  $("#discard-stack").classList.toggle("grouped", Boolean(groupedCards));
-  $("#discard-stack").innerHTML = displayedCards
+  const discardStack = $("#discard-stack");
+  discardStack.classList.toggle("grouped", Boolean(groupedCards));
+  if (groupedCards) discardStack.dataset.cardCount = groupedCards.length;
+  else delete discardStack.dataset.cardCount;
+  discardStack.innerHTML = displayedCards
     .map((card, index) => {
       const isTopCard = index === displayedCards.length - 1,
         rotation = (index - (displayedCards.length - 1) / 2) * 3;
@@ -413,7 +416,7 @@ function renderGame(game) {
   const groupIndicator = $("#group-play-indicator");
   groupIndicator.classList.toggle("hidden", !groupedCards);
   groupIndicator.textContent = groupedCards
-    ? `${lastPlayer?.name || "A player"} played ${groupedCards.length} cards`
+    ? `${lastPlayer?.name || "A player"} · ${groupedCards.length}-card play`
     : "";
   $("#draw-count").textContent = `${game.drawPileCount} cards`;
   $("#hand-count").textContent = `${me?.cardCount || 0} cards`;
