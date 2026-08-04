@@ -27,7 +27,7 @@ export async function handleRoomRequest(
   const stub = env.GAME_ROOMS.get(env.GAME_ROOMS.idFromName(roomId));
 
   if (operation === "join" && request.method === "POST")
-    return joinRoom(request, stub);
+    return joinRoom(request, stub, env);
   if (operation === "command" && request.method === "POST")
     return forwardCommand(request, stub);
   if (operation === "state" && request.method === "POST")
@@ -128,11 +128,16 @@ async function createRoom(request: Request, env: WorkerEnv) {
   );
 }
 
-async function joinRoom(request: Request, stub: DurableObjectStub) {
+async function joinRoom(
+  request: Request,
+  stub: DurableObjectStub,
+  env: WorkerEnv,
+) {
   const input = await readJson<{
     displayName?: string;
     inviteCredential?: string;
   }>(request);
+  const user = await getSessionUser(request, env.AUTH_DB, env.SESSION_SECRET);
   const playerId = crypto.randomUUID();
   const reconnectToken = randomToken(32);
   const command: RoomCommand = {
@@ -144,6 +149,7 @@ async function joinRoom(request: Request, stub: DurableObjectStub) {
     ...(input.inviteCredential
       ? { inviteHash: await hashSecret(input.inviteCredential) }
       : {}),
+    ...(user ? { ownerUserId: user.id } : {}),
   };
   const response = await stub.fetch("https://room.internal/command", {
     method: "POST",

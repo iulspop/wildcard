@@ -392,7 +392,13 @@ export class GameRoom implements DurableObject {
     command: Extract<RoomCommand, { type: "join" }>,
   ): RoomStateResponse {
     const row = this.metadataRow()!;
-    if (row.invite_hash && row.invite_hash !== command.inviteHash)
+    const ownerAuthorized =
+      Boolean(command.ownerUserId) && command.ownerUserId === row.owner_user_id;
+    if (
+      row.invite_hash &&
+      row.invite_hash !== command.inviteHash &&
+      !ownerAuthorized
+    )
       throw new RoomError(
         "invite-required",
         "The room invite credential is invalid",
@@ -404,19 +410,36 @@ export class GameRoom implements DurableObject {
         "The game has already started",
         409,
       );
-    if (stored.seats.length >= 8)
-      throw new RoomError("room-full", "The room is full", 409);
     if (stored.seats.some((seat) => seat.playerId === command.playerId))
       throw new RoomError("player-exists", "Player is already seated", 409);
     const displayName = validateName(command.displayName, "Display name");
-    if (
-      stored.seats.some(
-        (seat) =>
-          seat.displayName.toLocaleLowerCase() ===
-          displayName.toLocaleLowerCase(),
-      )
-    )
-      throw new RoomError("name-taken", "Display name is already in use", 409);
+    const existingSeat = stored.seats.find(
+      (seat) =>
+        seat.displayName.toLocaleLowerCase() ===
+        displayName.toLocaleLowerCase(),
+    );
+    if (existingSeat) {
+      if (!ownerAuthorized || existingSeat.connected)
+        throw new RoomError(
+          "name-taken",
+          "Display name is already in use",
+          409,
+        );
+      this.state.storage.sql.exec(
+        "UPDATE seats SET player_id = ?, reconnect_hash = ?, connected = 1, joined_at = ? WHERE player_id = ?",
+        command.playerId,
+        command.reconnectHash,
+        Date.now(),
+        existingSeat.playerId,
+      );
+      existingSeat.playerId = command.playerId;
+      existingSeat.reconnectHash = command.reconnectHash;
+      existingSeat.connected = true;
+      this.bumpVersion(stored);
+      return this.publicState(stored, existingSeat.playerId);
+    }
+    if (stored.seats.length >= 8)
+      throw new RoomError("room-full", "The room is full", 409);
     const seat = {
       playerId: command.playerId,
       displayName,

@@ -96,6 +96,9 @@ async function loadSession() {
   $("#auth-controls").classList.toggle("hidden", Boolean(sessionUser));
   $("#logout").classList.toggle("hidden", !sessionUser);
   $("#persistent-wrap").classList.toggle("hidden", !sessionUser);
+  const joinName = $("#join-form input[name='displayName']");
+  if (roomId && sessionUser && joinName && !joinName.value)
+    joinName.value = sessionUser.displayName;
   await loadOwnedRooms();
 }
 async function loadOwnedRooms() {

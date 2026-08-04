@@ -39,6 +39,7 @@ export type RoomCommand =
       displayName: string;
       reconnectHash: string;
       inviteHash?: string;
+      ownerUserId?: string;
     })
   | (BaseCommand & {
       type: "reconnect";
