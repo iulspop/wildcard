@@ -17,7 +17,7 @@ it("only exposes the viewing player's hand", () => {
   );
 });
 
-it("projects opponents in left-to-right upcoming turn order", () => {
+it("projects fixed opponent seats around each viewer's place in the ring", () => {
   const state = makeTestState({
     players: [
       { id: "p1", name: "One", hand: [card("red", "number", 1)] },
@@ -29,17 +29,23 @@ it("projects opponents in left-to-right upcoming turn order", () => {
     direction: 1,
   });
 
-  expect(projectGame(state, "p1").upcomingPlayerIds).toEqual([
+  expect(projectGame(state, "p1").seatedOpponentIds).toEqual([
     "p2",
     "p3",
     "p4",
   ]);
+  expect(projectGame(state, "p2").seatedOpponentIds).toEqual([
+    "p3",
+    "p4",
+    "p1",
+  ]);
+
+  state.currentPlayerIndex = 3;
   state.direction = -1;
-  expect(projectGame(state, "p1").upcomingPlayerIds).toEqual([
-    "p2",
-    "p4",
-    "p3",
-  ]);
+  const reversedView = projectGame(state, "p1");
+  expect(reversedView.seatedOpponentIds).toEqual(["p2", "p3", "p4"]);
+  expect(reversedView.currentPlayerId).toBe("p4");
+  expect(reversedView.direction).toBe(-1);
 });
 
 it("projects the public cards from the most recent play", () => {

@@ -21,7 +21,7 @@ export interface GameView {
   topDiscard: Card;
   drawPileCount: number;
   currentPlayerId: string;
-  upcomingPlayerIds: string[];
+  seatedOpponentIds: string[];
   direction: 1 | -1;
   activeColor: CardColor;
   pendingDraw: { kind: DrawKind; amount: number } | null;
@@ -40,16 +40,18 @@ export interface GameView {
 export function projectGame(state: GameState, viewerId?: string): GameView {
   const topDiscard = state.discardPile.at(-1);
   if (!topDiscard) throw new Error("Game state has no discard card");
-  const upcomingPlayerIds = Array.from(
-    { length: state.players.length },
-    (_, offset) =>
-      state.players[
-        (state.currentPlayerIndex +
-          offset * state.direction +
-          state.players.length) %
-          state.players.length
-      ]!.id,
-  ).filter((playerId) => playerId !== viewerId);
+  const viewerIndex = state.players.findIndex(
+    (player) => player.id === viewerId,
+  );
+  const seatedOpponentIds =
+    viewerIndex === -1
+      ? state.players.map((player) => player.id)
+      : Array.from(
+          { length: state.players.length - 1 },
+          (_, offset) =>
+            state.players[(viewerIndex + offset + 1) % state.players.length]!
+              .id,
+        );
 
   return {
     protocolVersion: state.protocolVersion,
@@ -65,7 +67,7 @@ export function projectGame(state: GameState, viewerId?: string): GameView {
     topDiscard: { ...topDiscard },
     drawPileCount: state.drawPile.length,
     currentPlayerId: state.players[state.currentPlayerIndex]!.id,
-    upcomingPlayerIds,
+    seatedOpponentIds,
     direction: state.direction,
     activeColor: state.activeColor,
     pendingDraw: state.pendingDraw ? { ...state.pendingDraw } : null,

@@ -349,11 +349,11 @@ function renderUno(game) {
   }
 }
 
-function opponentsInUpcomingTurnOrder(game) {
+function opponentsInFixedSeatingOrder(game) {
   const playersById = new Map(
     game.players.map((player) => [player.id, player]),
   );
-  return (game.upcomingPlayerIds || [])
+  return (game.seatedOpponentIds || [])
     .map((playerId) => playersById.get(playerId))
     .filter(Boolean);
 }
@@ -386,7 +386,7 @@ function renderGame(game) {
   activeColor.className = `active-color ${game.activeColor}`;
   activeColor.innerHTML = `<span class="active-color-swatch" aria-hidden="true"></span>Current color: ${escapeHTML(game.activeColor)}`;
   renderUno(game);
-  $("#opponents").innerHTML = opponentsInUpcomingTurnOrder(game)
+  $("#opponents").innerHTML = opponentsInFixedSeatingOrder(game)
     .map((p) => {
       const visibleCardCount = Math.min(p.cardCount, 10);
       const cardBacks = Array.from({ length: visibleCardCount }, (_, index) => {
