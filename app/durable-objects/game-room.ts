@@ -4,7 +4,7 @@ import {
   createGame,
   randomPlayerShuffle,
 } from "../domain/game/engine.ts";
-import { normalizeRules } from "../domain/game/rules.ts";
+import { DEFAULT_GAME_RULES, normalizeRules } from "../domain/game/rules.ts";
 import { GameRuleError, type GameState } from "../domain/game/types.ts";
 import { projectGame } from "../domain/game/view.ts";
 import type { WorkerEnv } from "../services/env.server.ts";
@@ -12,6 +12,7 @@ import {
   ROOM_PROTOCOL_VERSION,
   type RoomCommand,
   type RoomMetadata,
+  type RoomSettings,
   type RoomStateResponse,
   type StoredRoomState,
 } from "./protocol.ts";
@@ -26,6 +27,7 @@ type MetadataRow = {
   invite_hash: string | null;
   created_at: number;
   version: number;
+  settings_json: string;
 };
 type SeatRow = {
   player_id: string;
@@ -68,6 +70,31 @@ export class GameRoom implements DurableObject {
       .toArray();
     if (!seatColumns.some((column) => column.name === "user_id"))
       this.state.storage.sql.exec("ALTER TABLE seats ADD COLUMN user_id TEXT");
+    const metadataColumns = this.state.storage.sql
+      .exec<{ name: string }>("PRAGMA table_info(room_metadata)")
+      .toArray();
+    if (!metadataColumns.some((column) => column.name === "settings_json"))
+      this.state.storage.sql.exec(
+        `ALTER TABLE room_metadata ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{"finishMode":"first-out"}'`,
+      );
+    const matchColumns = this.state.storage.sql
+      .exec<{ name: string }>("PRAGMA table_info(completed_matches)")
+      .toArray();
+    if (!matchColumns.some((column) => column.name === "placements_json"))
+      this.state.storage.sql.exec(
+        "ALTER TABLE completed_matches ADD COLUMN placements_json TEXT NOT NULL DEFAULT '[]'",
+      );
+    const standingColumns = this.state.storage.sql
+      .exec<{ name: string }>("PRAGMA table_info(standings)")
+      .toArray();
+    if (!standingColumns.some((column) => column.name === "total_placement"))
+      this.state.storage.sql.exec(
+        "ALTER TABLE standings ADD COLUMN total_placement INTEGER NOT NULL DEFAULT 0",
+      );
+    if (!standingColumns.some((column) => column.name === "best_placement"))
+      this.state.storage.sql.exec(
+        "ALTER TABLE standings ADD COLUMN best_placement INTEGER",
+      );
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -194,6 +221,7 @@ export class GameRoom implements DurableObject {
       if (
         incoming.type !== "action" &&
         incoming.type !== "start" &&
+        incoming.type !== "update-settings" &&
         incoming.type !== "lobby" &&
         incoming.type !== "kick" &&
         incoming.type !== "end-game" &&
@@ -381,8 +409,9 @@ export class GameRoom implements DurableObject {
       seat.connected = false;
       return this.publicState(stored, seat.playerId);
     }
-    if (command.type === "start")
-      return this.start(stored, seat, command.rules);
+    if (command.type === "start") return this.start(stored, seat);
+    if (command.type === "update-settings")
+      return this.updateSettings(stored, seat, command.settings);
     if (command.type === "lobby") return this.returnToLobby(stored, seat);
     if (command.type === "kick")
       return this.kickPlayer(stored, seat, command.targetPlayerId);
@@ -403,14 +432,16 @@ export class GameRoom implements DurableObject {
       );
     const name = validateName(command.name, "Room name");
     const now = Date.now();
+    const settings: RoomSettings = { finishMode: "first-out" };
     this.state.storage.sql.exec(
-      "INSERT INTO room_metadata (singleton, room_id, name, owner_user_id, persistent, invite_hash, created_at, version) VALUES (1, ?, ?, ?, ?, ?, ?, 1)",
+      "INSERT INTO room_metadata (singleton, room_id, name, owner_user_id, persistent, invite_hash, created_at, version, settings_json) VALUES (1, ?, ?, ?, ?, ?, ?, 1, ?)",
       command.roomId,
       name,
       command.ownerUserId ?? null,
       command.persistent ? 1 : 0,
       null,
       now,
+      JSON.stringify(settings),
     );
     return this.publicState({
       room: {
@@ -421,6 +452,7 @@ export class GameRoom implements DurableObject {
         createdAt: now,
         version: 1,
       },
+      settings,
       seats: [],
       game: null,
     });
@@ -507,7 +539,6 @@ export class GameRoom implements DurableObject {
   private start(
     stored: StoredRoomState,
     seat: StoredRoomState["seats"][number],
-    rules: Extract<RoomCommand, { type: "start" }>["rules"],
   ): RoomStateResponse {
     if (seat.seatIndex !== 0)
       throw new RoomError(
@@ -526,11 +557,46 @@ export class GameRoom implements DurableObject {
         id: playerId,
         name: displayName,
       })),
-      rules,
+      rules: {
+        ...DEFAULT_GAME_RULES,
+        finishMode: stored.settings.finishMode,
+      },
       shuffle: randomShuffle(secureRandom),
       playerShuffle: randomPlayerShuffle(secureRandom),
     });
     this.persistGame(stored.game);
+    this.bumpVersion(stored);
+    return this.publicState(stored, seat.playerId);
+  }
+
+  private updateSettings(
+    stored: StoredRoomState,
+    seat: StoredRoomState["seats"][number],
+    settings: RoomSettings,
+  ): RoomStateResponse {
+    if (seat.seatIndex !== 0)
+      throw new RoomError(
+        "not-owner",
+        "Only the room host can change settings",
+        403,
+      );
+    if (stored.game)
+      throw new RoomError(
+        "settings-locked",
+        "Room settings cannot change after a game starts",
+        409,
+      );
+    if (
+      settings.finishMode !== "first-out" &&
+      settings.finishMode !== "rank-all"
+    )
+      throw new RoomError("invalid-settings", "Invalid finish mode", 400);
+
+    stored.settings = { finishMode: settings.finishMode };
+    this.state.storage.sql.exec(
+      "UPDATE room_metadata SET settings_json = ? WHERE singleton = 1",
+      JSON.stringify(stored.settings),
+    );
     this.bumpVersion(stored);
     return this.publicState(stored, seat.playerId);
   }
@@ -665,7 +731,7 @@ export class GameRoom implements DurableObject {
       generateClaimId: () => crypto.randomUUID(),
     }).state;
     if (stored.game.phase === "finished" && stored.game.winnerId)
-      this.recordCompletedMatch(stored, action.actionId, stored.game.winnerId);
+      this.recordCompletedMatch(stored, action.actionId, stored.game);
     this.persistGame(stored.game);
     this.bumpVersion(stored);
     this.state.storage.sql.exec(
@@ -705,6 +771,7 @@ export class GameRoom implements DurableObject {
       : null;
     if (game) {
       game.rules = normalizeRules(game.rules);
+      if (game.finishOrder === undefined) game.finishOrder = [];
       if (game.drawnCardId === undefined) game.drawnCardId = null;
       if (game.lastPlay === undefined) game.lastPlay = null;
       if (game.unoClaim === undefined) game.unoClaim = null;
@@ -723,6 +790,7 @@ export class GameRoom implements DurableObject {
     }
     return {
       room: mapMetadata(row),
+      settings: parseRoomSettings(row.settings_json),
       seats,
       game,
     };
@@ -738,7 +806,7 @@ export class GameRoom implements DurableObject {
   private metadataRow() {
     return this.state.storage.sql
       .exec<MetadataRow>(
-        "SELECT room_id, name, owner_user_id, persistent, invite_hash, created_at, version FROM room_metadata WHERE singleton = 1",
+        "SELECT room_id, name, owner_user_id, persistent, invite_hash, created_at, version, settings_json FROM room_metadata WHERE singleton = 1",
       )
       .toArray()[0];
   }
@@ -763,28 +831,49 @@ export class GameRoom implements DurableObject {
   private recordCompletedMatch(
     stored: StoredRoomState,
     matchId: string,
-    winnerId: string,
+    game: GameState,
   ) {
+    const winnerId = game.winnerId!;
+    const rankedPlacements = new Map(
+      game.finishOrder.map((playerId, index) => [playerId, index + 1]),
+    );
+    const placements = stored.seats.map((seat) => ({
+      playerId: seat.playerId,
+      placement:
+        rankedPlacements.get(seat.playerId) ??
+        (seat.playerId === winnerId ? 1 : 2),
+    }));
     const now = Date.now();
     this.state.storage.sql.exec(
-      "INSERT INTO completed_matches (id, winner_player_id, completed_at) VALUES (?, ?, ?)",
+      "INSERT INTO completed_matches (id, winner_player_id, placements_json, completed_at) VALUES (?, ?, ?, ?)",
       matchId,
       winnerId,
+      JSON.stringify(placements),
       now,
     );
     for (const seat of stored.seats) {
       const won = seat.playerId === winnerId;
+      const placement =
+        placements.find((result) => result.playerId === seat.playerId)
+          ?.placement ?? 2;
       this.state.storage.sql.exec(
-        `INSERT INTO standings (display_name, games, wins, losses, updated_at)
-         VALUES (?, 1, ?, ?, ?)
+        `INSERT INTO standings (display_name, games, wins, losses, total_placement, best_placement, updated_at)
+         VALUES (?, 1, ?, ?, ?, ?, ?)
          ON CONFLICT(display_name) DO UPDATE SET
            games = games + 1,
            wins = wins + excluded.wins,
            losses = losses + excluded.losses,
+           total_placement = total_placement + excluded.total_placement,
+           best_placement = CASE
+             WHEN best_placement IS NULL THEN excluded.best_placement
+             ELSE MIN(best_placement, excluded.best_placement)
+           END,
            updated_at = excluded.updated_at`,
         seat.displayName,
         won ? 1 : 0,
         won ? 0 : 1,
+        placement,
+        placement,
         now,
       );
     }
@@ -813,6 +902,7 @@ export class GameRoom implements DurableObject {
     return {
       protocolVersion: ROOM_PROTOCOL_VERSION,
       room: { ...stored.room },
+      settings: { ...stored.settings },
       seats: stored.seats.map((seat) => ({
         playerId: seat.playerId,
         displayName: seat.displayName,
@@ -826,9 +916,16 @@ export class GameRoom implements DurableObject {
           games: number;
           wins: number;
           losses: number;
+          total_placement: number;
+          best_placement: number | null;
           updated_at: number;
         }>(
-          "SELECT display_name, games, wins, losses, updated_at FROM standings ORDER BY wins DESC, losses ASC, display_name ASC",
+          `SELECT display_name, games, wins, losses, total_placement, best_placement, updated_at
+           FROM standings
+           ORDER BY wins DESC,
+             CASE WHEN games > 0 THEN CAST(total_placement AS REAL) / games END ASC,
+             best_placement ASC,
+             display_name ASC`,
         )
         .toArray()
         .map((row) => ({
@@ -836,6 +933,10 @@ export class GameRoom implements DurableObject {
           games: row.games,
           wins: row.wins,
           losses: row.losses,
+          totalPlacement: row.total_placement,
+          bestPlacement: row.best_placement,
+          averagePlacement:
+            row.games > 0 ? row.total_placement / row.games : null,
           updatedAt: row.updated_at,
         })),
     };
@@ -857,6 +958,16 @@ function mapMetadata(row: MetadataRow): RoomMetadata {
     createdAt: row.created_at,
     version: row.version,
   };
+}
+
+function parseRoomSettings(value: string): RoomSettings {
+  try {
+    const settings = JSON.parse(value) as Partial<RoomSettings>;
+    if (settings.finishMode === "rank-all") return { finishMode: "rank-all" };
+  } catch {
+    // Legacy or malformed settings use the backward-compatible default.
+  }
+  return { finishMode: "first-out" };
 }
 
 function validateName(value: string, label: string) {

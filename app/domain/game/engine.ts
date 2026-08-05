@@ -90,6 +90,7 @@ export function createGame({
     lastPlay: null,
     unoClaim: null,
     actionSequence: 0,
+    finishOrder: [],
     winnerId: null,
     turnNumber: 1,
   };
@@ -235,6 +236,8 @@ function requireUnoClaim(state: GameState, claimId: string) {
 }
 
 export function canPlayCard(state: GameState, card: Card): boolean {
+  const currentPlayer = state.players[state.currentPlayerIndex];
+  if (!currentPlayer || isFinishedPlayer(state, currentPlayer.id)) return false;
   if (state.drawnCardId !== null && card.id !== state.drawnCardId) return false;
   if (state.pendingDraw) {
     return (
@@ -350,10 +353,25 @@ function applyPlay(
   ];
 
   if (player.hand.length === 0) {
-    state.phase = "finished";
-    state.winnerId = playerId;
-    events.push({ type: "game-won", playerId });
-    return { state, events };
+    if (state.rules.finishMode === "first-out") {
+      state.finishOrder = [playerId];
+      state.phase = "finished";
+      state.winnerId = playerId;
+      events.push({ type: "player-finished", playerId, placement: 1 });
+      events.push({ type: "game-won", playerId });
+      return { state, events };
+    }
+
+    finishPlayer(state, playerId, events);
+    const activePlayers = getActivePlayers(state);
+    if (activePlayers.length === 1) {
+      finishPlayer(state, activePlayers[0]!.id, events);
+      state.phase = "finished";
+      state.winnerId = state.finishOrder[0] ?? null;
+      if (state.winnerId)
+        events.push({ type: "game-won", playerId: state.winnerId });
+      return { state, events };
+    }
   }
 
   finishTurn(state, 1 + skippedPlayers, events);
@@ -413,18 +431,54 @@ function finishTurn(
   steps: number,
   events: GameEvent[],
 ): void {
-  state.currentPlayerIndex = advanceIndex(
-    state.currentPlayerIndex,
-    state.direction,
-    steps,
-    state.players.length,
-  );
+  state.currentPlayerIndex = advanceActiveIndex(state, steps);
   state.turnNumber += 1;
   events.push({
     type: "turn-changed",
     playerId: state.players[state.currentPlayerIndex]!.id,
     turnNumber: state.turnNumber,
   });
+}
+
+function finishPlayer(
+  state: GameState,
+  playerId: string,
+  events: GameEvent[],
+): void {
+  if (isFinishedPlayer(state, playerId)) return;
+  state.finishOrder.push(playerId);
+  state.drawnCardId = null;
+  if (state.unoClaim?.targetPlayerId === playerId) state.unoClaim = null;
+  events.push({
+    type: "player-finished",
+    playerId,
+    placement: state.finishOrder.length,
+  });
+}
+
+function getActivePlayers(state: GameState) {
+  return state.players.filter((player) => !isFinishedPlayer(state, player.id));
+}
+
+function isFinishedPlayer(state: GameState, playerId: string): boolean {
+  return state.finishOrder.includes(playerId);
+}
+
+function advanceActiveIndex(state: GameState, steps: number): number {
+  if (steps < 1 || !Number.isInteger(steps)) {
+    throw new GameRuleError("invalid-state", "Turn steps must be positive");
+  }
+  if (getActivePlayers(state).length === 0) {
+    throw new GameRuleError("invalid-state", "No active players remain");
+  }
+
+  let index = state.currentPlayerIndex;
+  for (let step = 0; step < steps; step++) {
+    do {
+      index = advanceIndex(index, state.direction, 1, state.players.length);
+    } while (isFinishedPlayer(state, state.players[index]!.id));
+  }
+  return index;
 }
 
 function replenishDrawPile(state: GameState, shuffle: Shuffle): void {
@@ -479,12 +533,16 @@ function validateStateAndAction(state: GameState, action: GameAction): void {
     throw new GameRuleError("invalid-action", "UNO claim ID is required");
   }
   const currentPlayer = state.players[state.currentPlayerIndex];
-  if (
-    action.type !== "call-uno" &&
-    action.type !== "catch-uno" &&
-    (!currentPlayer || action.playerId !== currentPlayer.id)
-  ) {
-    throw new GameRuleError("not-your-turn", "It is not this player's turn");
+  if (action.type !== "call-uno" && action.type !== "catch-uno") {
+    if (isFinishedPlayer(state, action.playerId)) {
+      throw new GameRuleError(
+        "invalid-action",
+        "Finished players are spectators for the rest of this game",
+      );
+    }
+    if (!currentPlayer || action.playerId !== currentPlayer.id) {
+      throw new GameRuleError("not-your-turn", "It is not this player's turn");
+    }
   }
 }
 
@@ -576,5 +634,6 @@ function cloneState(state: GameState): GameState {
         }
       : null,
     unoClaim: state.unoClaim ? { ...state.unoClaim } : null,
+    finishOrder: [...state.finishOrder],
   };
 }

@@ -512,6 +512,17 @@ label {
     0 12px 35px #00150d99;
 }
 
+.opponent.finished {
+  border-color: #bca9ff66;
+  background: #17152a99;
+  opacity: 0.82;
+}
+
+.opponent.finished .opponent-cards {
+  filter: grayscale(0.75);
+  opacity: 0.42;
+}
+
 .opponent-cards {
   position: relative;
   height: 78px;
@@ -568,7 +579,8 @@ label {
   font-size: 0.75rem;
 }
 
-.playing-badge {
+.playing-badge,
+.placement-badge {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -580,6 +592,11 @@ label {
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+.placement-badge {
+  background: #bca9ff;
+  color: #171225;
 }
 
 .turn-hud {
@@ -600,6 +617,27 @@ label {
   font-size: 1.05rem;
   font-weight: 900;
   color: #fff;
+}
+
+.finish-progress {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.finish-progress span {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #bca9ff26;
+  color: #e5ddff;
+  font-size: 0.72rem;
+}
+
+.game-table.my-turn .finish-progress span {
+  background: #17120a1f;
+  color: #17120a;
 }
 
 .game-table.my-turn {
@@ -1099,6 +1137,22 @@ button.card.selected {
   border: 1px solid #f9cb4055;
   border-radius: 12px;
   background: #f9cb4018;
+}
+
+.setting-description {
+  margin: -4px 0 0;
+  color: var(--muted);
+}
+
+.local-placement {
+  margin: 4px 0 12px;
+  padding: 12px 14px;
+  border: 1px solid #bca9ff55;
+  border-radius: 14px;
+  background: #bca9ff14;
+  color: #e5ddff;
+  text-align: center;
+  font-weight: 700;
 }
 
 .standings {

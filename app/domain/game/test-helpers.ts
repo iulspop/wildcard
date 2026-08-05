@@ -46,6 +46,7 @@ export function makeTestState(overrides: Partial<GameState> = {}): GameState {
     lastPlay: null,
     unoClaim: null,
     actionSequence: 0,
+    finishOrder: [],
     winnerId: null,
     turnNumber: 1,
     ...overrides,

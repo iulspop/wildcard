@@ -11,12 +11,15 @@ export interface PlayerView {
   id: string;
   name: string;
   cardCount: number;
+  placement: number | null;
   hand?: Card[];
 }
 
 export interface GameView {
   protocolVersion: 1;
   phase: GamePhase;
+  finishMode: "first-out" | "rank-all";
+  finishOrder: string[];
   players: PlayerView[];
   topDiscard: Card;
   drawPileCount: number;
@@ -35,6 +38,11 @@ export interface GameView {
   playableCardIds: string[];
   winnerId: string | null;
   turnNumber: number;
+}
+
+function placementFor(state: GameState, playerId: string): number | null {
+  const index = state.finishOrder.indexOf(playerId);
+  return index === -1 ? null : index + 1;
 }
 
 export function projectGame(state: GameState, viewerId?: string): GameView {
@@ -56,10 +64,13 @@ export function projectGame(state: GameState, viewerId?: string): GameView {
   return {
     protocolVersion: state.protocolVersion,
     phase: state.phase,
+    finishMode: state.rules.finishMode,
+    finishOrder: [...state.finishOrder],
     players: state.players.map((player) => ({
       id: player.id,
       name: player.name,
       cardCount: player.hand.length,
+      placement: placementFor(state, player.id),
       ...(player.id === viewerId
         ? { hand: player.hand.map((card) => ({ ...card })) }
         : {}),

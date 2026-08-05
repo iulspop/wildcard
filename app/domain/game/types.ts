@@ -22,6 +22,7 @@ export interface GameRules {
   wild4Anytime: boolean;
   drawStacking: "same-type" | "none";
   drawEndsTurn: boolean;
+  finishMode: "first-out" | "rank-all";
   unoEnabled: boolean;
   unoCatchPenalty: number;
   unoGraceMs: number;
@@ -65,6 +66,7 @@ export interface GameState {
   lastPlay: { playerId: string; cards: Card[] } | null;
   unoClaim: UnoClaim | null;
   actionSequence: number;
+  finishOrder: string[];
   winnerId: string | null;
   turnNumber: number;
 }
@@ -113,6 +115,7 @@ export type GameEvent =
   | { type: "uno-opened"; claim: UnoClaim }
   | { type: "uno-called"; playerId: string; claimId: string }
   | { type: "uno-expired"; playerId: string; claimId: string }
+  | { type: "player-finished"; playerId: string; placement: number }
   | {
       type: "uno-caught";
       playerId: string;

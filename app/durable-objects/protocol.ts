@@ -1,4 +1,4 @@
-import type { GameAction, GameRules, GameState } from "../domain/game/types.ts";
+import type { GameAction, GameState } from "../domain/game/types.ts";
 import type { GameView } from "../domain/game/view.ts";
 
 export const ROOM_PROTOCOL_VERSION = 1 as const;
@@ -8,6 +8,10 @@ export interface RoomSeat {
   displayName: string;
   seatIndex: number;
   connected: boolean;
+}
+
+export interface RoomSettings {
+  finishMode: "first-out" | "rank-all";
 }
 
 export interface RoomMetadata {
@@ -48,7 +52,12 @@ export type RoomCommand =
       type: "start";
       playerId: string;
       reconnectHash: string;
-      rules?: GameRules;
+    })
+  | (BaseCommand & {
+      type: "update-settings";
+      playerId: string;
+      reconnectHash: string;
+      settings: RoomSettings;
     })
   | (BaseCommand & {
       type: "lobby";
@@ -78,12 +87,16 @@ export interface RoomStanding {
   games: number;
   wins: number;
   losses: number;
+  totalPlacement: number;
+  bestPlacement: number | null;
+  averagePlacement: number | null;
   updatedAt: number;
 }
 
 export interface RoomStateResponse {
   protocolVersion: typeof ROOM_PROTOCOL_VERSION;
   room: RoomMetadata;
+  settings: RoomSettings;
   seats: RoomSeat[];
   game: GameView | null;
   standings: RoomStanding[];
@@ -91,6 +104,7 @@ export interface RoomStateResponse {
 
 export interface StoredRoomState {
   room: RoomMetadata;
+  settings: RoomSettings;
   seats: Array<RoomSeat & { reconnectHash: string; userId: string | null }>;
   game: GameState | null;
 }

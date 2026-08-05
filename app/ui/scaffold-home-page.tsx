@@ -156,7 +156,16 @@ export function HomePage() {
                 <ul id="seats" className="seat-list" />
               </div>
               <div className="panel stack">
-                <h2>Invite friends</h2>
+                <h2>Room setup</h2>
+                <label htmlFor="finish-mode">Match finish</label>
+                <select id="finish-mode">
+                  <option value="first-out">First player out</option>
+                  <option value="rank-all">Rank every player</option>
+                </select>
+                <p id="finish-mode-description" className="setting-description">
+                  The match ends as soon as one player empties their hand.
+                </p>
+                <small id="finish-mode-access" />
                 <label>
                   Invite URL
                   <input id="invite-url" readOnly />
@@ -180,6 +189,8 @@ export function HomePage() {
                     <th>L</th>
                     <th>Games</th>
                     <th>W/L</th>
+                    <th>Best</th>
+                    <th>Avg.</th>
                   </tr>
                 </thead>
                 <tbody id="standings" />
@@ -194,6 +205,10 @@ export function HomePage() {
                 <div id="opponents" className="opponents" />
                 <div className="turn-hud" aria-live="polite">
                   <div id="turn" className="turn turn-primary" />
+                  <div
+                    id="finish-progress"
+                    className="finish-progress hidden"
+                  />
                   <div className="turn-meta">
                     <span id="direction" />
                     <span id="pending" />
@@ -275,6 +290,11 @@ export function HomePage() {
                     <strong id="hand-count" />
                   </div>
                 </div>
+                <div
+                  id="local-placement"
+                  className="local-placement hidden"
+                  aria-live="polite"
+                />
                 <div id="hand" className="hand" aria-label="Your hand" />
                 <button id="play" className="play-button" type="button">
                   Play selected cards

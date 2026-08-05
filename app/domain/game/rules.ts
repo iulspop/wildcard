@@ -9,6 +9,7 @@ export const DEFAULT_GAME_RULES: GameRules = Object.freeze({
   wild4Anytime: true,
   drawStacking: "same-type",
   drawEndsTurn: true,
+  finishMode: "first-out",
   unoEnabled: true,
   unoCatchPenalty: 4,
   unoGraceMs: 750,
@@ -34,6 +35,9 @@ export function validateRules(rules: GameRules): void {
   }
   if (!Number.isInteger(rules.initialHandSize) || rules.initialHandSize < 1) {
     throw new Error("initialHandSize must be positive");
+  }
+  if (rules.finishMode !== "first-out" && rules.finishMode !== "rank-all") {
+    throw new Error("finishMode must be first-out or rank-all");
   }
   if (!Number.isInteger(rules.unoCatchPenalty) || rules.unoCatchPenalty < 1) {
     throw new Error("unoCatchPenalty must be positive");

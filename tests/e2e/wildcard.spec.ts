@@ -10,7 +10,14 @@ type Card = {
 };
 type GameState = {
   phase: "playing" | "finished";
-  players: Array<{ id: string; cardCount: number; hand?: Card[] }>;
+  players: Array<{
+    id: string;
+    cardCount: number;
+    hand?: Card[];
+    placement: number | null;
+  }>;
+  finishMode: "first-out" | "rank-all";
+  finishOrder: string[];
   topDiscard: Card;
   currentPlayerId: string;
   activeColor: "red" | "yellow" | "green" | "blue";
@@ -82,12 +89,16 @@ async function roomState(
   });
   expect(response.ok()).toBeTruthy();
   return (await response.json()) as {
+    settings: { finishMode: "first-out" | "rank-all" };
     game: GameState;
     standings: Array<{
       displayName: string;
       games: number;
       wins: number;
       losses: number;
+      totalPlacement: number;
+      bestPlacement: number | null;
+      averagePlacement: number | null;
     }>;
   };
 }
@@ -399,9 +410,99 @@ test("guest players can create, join, and start a room from its private URL", as
       hand.filter((card) => cardGroup(card) === cardGroup(firstPlayable))
         .length,
     );
-  } else {
+  } else if (aliceState.game.currentPlayerId === alice.playerId) {
     await expect(page.locator("#draw")).toBeEnabled();
+  } else {
+    await expect(page.locator("#draw")).toBeDisabled();
+    await expect(page.locator("#hand [data-card]:enabled")).toHaveCount(0);
   }
+});
+
+test("rank-all settings persist, lock at start, and record placements", async ({
+  request,
+}) => {
+  const room = await createRoom(request, "Rank every player");
+  const players = await Promise.all(
+    ["Alice", "Bob", "Casey"].map((name) => join(request, room.roomId, name)),
+  );
+
+  const nonHostUpdate = await request.post(
+    `/api/rooms/${room.roomId}/command`,
+    {
+      data: {
+        ...players[1],
+        command: {
+          protocolVersion: 1,
+          type: "update-settings",
+          settings: { finishMode: "rank-all" },
+        },
+      },
+    },
+  );
+  expect(nonHostUpdate.status()).toBe(403);
+
+  const hostUpdate = await request.post(`/api/rooms/${room.roomId}/command`, {
+    data: {
+      ...players[0],
+      command: {
+        protocolVersion: 1,
+        type: "update-settings",
+        settings: { finishMode: "rank-all" },
+      },
+    },
+  });
+  expect(hostUpdate.ok()).toBeTruthy();
+  expect((await hostUpdate.json()).settings.finishMode).toBe("rank-all");
+
+  const persisted = await roomState(request, room.roomId, players[2]!);
+  expect(persisted.settings.finishMode).toBe("rank-all");
+
+  const start = await request.post(`/api/rooms/${room.roomId}/command`, {
+    data: {
+      ...players[0],
+      command: { protocolVersion: 1, type: "start" },
+    },
+  });
+  expect(start.ok()).toBeTruthy();
+  expect((await start.json()).game.finishMode).toBe("rank-all");
+
+  const lockedUpdate = await request.post(`/api/rooms/${room.roomId}/command`, {
+    data: {
+      ...players[0],
+      command: {
+        protocolVersion: 1,
+        type: "update-settings",
+        settings: { finishMode: "first-out" },
+      },
+    },
+  });
+  expect(lockedUpdate.status()).toBe(409);
+
+  const finished = await finishGame(request, room.roomId, players);
+  expect(finished.game.finishOrder).toHaveLength(3);
+  expect(new Set(finished.game.finishOrder)).toEqual(
+    new Set(players.map((player) => player.playerId)),
+  );
+  expect(
+    finished.game.players.map((player) => player.placement).sort(),
+  ).toEqual([1, 2, 3]);
+
+  const standings = finished.standings;
+  expect(standings).toHaveLength(3);
+  expect(standings.reduce((wins, standing) => wins + standing.wins, 0)).toBe(1);
+  expect(
+    standings.reduce((losses, standing) => losses + standing.losses, 0),
+  ).toBe(2);
+  expect(standings.map((standing) => standing.bestPlacement).sort()).toEqual([
+    1, 2, 3,
+  ]);
+  expect(standings.map((standing) => standing.averagePlacement).sort()).toEqual(
+    [1, 2, 3],
+  );
+
+  const restored = await roomState(request, room.roomId, players[1]!);
+  expect(restored.game.finishOrder).toEqual(finished.game.finishOrder);
+  expect(restored.standings).toEqual(standings);
 });
 
 test("eight players can join while unauthorized commands are rejected", async ({
@@ -445,10 +546,17 @@ test("eight players can join while unauthorized commands are rejected", async ({
     },
   });
   expect(start.ok()).toBeTruthy();
+  const startedState = await roomState(request, room.roomId, players[0]!);
+  const outOfTurnPlayer = players.find(
+    (player) => player.playerId !== startedState.game.currentPlayerId,
+  )!;
 
-  const outOfTurn = await sendGameAction(request, room.roomId, players[1]!, {
-    type: "draw",
-  });
+  const outOfTurn = await sendGameAction(
+    request,
+    room.roomId,
+    outOfTurnPlayer,
+    { type: "draw" },
+  );
   expect(outOfTurn.status()).toBe(409);
 });
 

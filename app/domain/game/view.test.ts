@@ -48,6 +48,37 @@ it("projects fixed opponent seats around each viewer's place in the ring", () =>
   expect(reversedView.direction).toBe(-1);
 });
 
+it("projects placements while preserving fixed seats and hand privacy", () => {
+  const state = makeTestState({
+    rules: { ...makeTestState().rules, finishMode: "rank-all" },
+    players: [
+      { id: "p1", name: "One", hand: [] },
+      { id: "p2", name: "Two", hand: [card("red", "number", 2)] },
+      { id: "p3", name: "Three", hand: [card("blue", "number", 3)] },
+    ],
+    currentPlayerIndex: 1,
+    finishOrder: ["p1"],
+  });
+  const spectatorView = projectGame(state, "p1");
+
+  expect(spectatorView.finishMode).toBe("rank-all");
+  expect(spectatorView.finishOrder).toEqual(["p1"]);
+  expect(spectatorView.seatedOpponentIds).toEqual(["p2", "p3"]);
+  expect(spectatorView.players[0]).toMatchObject({
+    id: "p1",
+    placement: 1,
+    cardCount: 0,
+    hand: [],
+  });
+  expect(spectatorView.players[1]!.placement).toBeNull();
+  expect(spectatorView.players[1]!.hand).toBeUndefined();
+  expect(spectatorView.playableCardIds).toEqual([]);
+
+  state.direction = -1;
+  state.currentPlayerIndex = 2;
+  expect(projectGame(state, "p1").seatedOpponentIds).toEqual(["p2", "p3"]);
+});
+
 it("projects the public cards from the most recent play", () => {
   const state = makeTestState();
   const playedCards = state.players[0]!.hand.slice(0, 2);

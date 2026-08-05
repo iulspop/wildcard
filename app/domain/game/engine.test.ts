@@ -250,6 +250,106 @@ describe("actions and turn order", () => {
   });
 });
 
+describe("rank-all completion", () => {
+  it("records finishers in order and automatically places the last active player", () => {
+    const firstLastCard = card("red", "number", 7);
+    const secondLastCard = card("red", "number", 8);
+    const state = makeTestState({
+      rules: { ...DEFAULT_GAME_RULES, finishMode: "rank-all" },
+      players: [
+        { id: "p1", name: "One", hand: [firstLastCard] },
+        { id: "p2", name: "Two", hand: [secondLastCard] },
+        { id: "p3", name: "Three", hand: [card("green", "number", 3)] },
+      ],
+    });
+
+    const firstResult = applyAction(
+      state,
+      action("p1", { type: "play", cardIds: [firstLastCard.id] }),
+    );
+    expect(firstResult.state).toMatchObject({
+      phase: "playing",
+      finishOrder: ["p1"],
+      winnerId: null,
+    });
+    expect(
+      firstResult.state.players[firstResult.state.currentPlayerIndex]!.id,
+    ).toBe("p2");
+    expect(firstResult.events).toContainEqual({
+      type: "player-finished",
+      playerId: "p1",
+      placement: 1,
+    });
+
+    const finalResult = applyAction(
+      firstResult.state,
+      action("p2", { type: "play", cardIds: [secondLastCard.id] }),
+    );
+    expect(finalResult.state).toMatchObject({
+      phase: "finished",
+      finishOrder: ["p1", "p2", "p3"],
+      winnerId: "p1",
+    });
+    expect(finalResult.events).toContainEqual({
+      type: "player-finished",
+      playerId: "p3",
+      placement: 3,
+    });
+    expect(finalResult.events).toContainEqual({
+      type: "game-won",
+      playerId: "p1",
+    });
+  });
+
+  it("skips finished players without changing their ring positions", () => {
+    const playable = card("red", "number", 7);
+    const state = makeTestState({
+      rules: { ...DEFAULT_GAME_RULES, finishMode: "rank-all" },
+      players: [
+        { id: "p1", name: "One", hand: [playable, card("green", "number", 1)] },
+        { id: "p2", name: "Two", hand: [] },
+        { id: "p3", name: "Three", hand: [card("green", "number", 3)] },
+        { id: "p4", name: "Four", hand: [card("green", "number", 4)] },
+      ],
+      finishOrder: ["p2"],
+    });
+
+    const clockwise = applyAction(
+      state,
+      action("p1", { type: "play", cardIds: [playable.id] }),
+    ).state;
+    expect(clockwise.players[clockwise.currentPlayerIndex]!.id).toBe("p3");
+
+    const reverseState = makeTestState({
+      ...state,
+      direction: -1,
+      players: state.players.map((player) => ({
+        ...player,
+        hand: player.hand.map((held) => ({ ...held })),
+      })),
+    });
+    const counterclockwise = applyAction(
+      reverseState,
+      action("p1", { type: "play", cardIds: [playable.id] }),
+    ).state;
+    expect(
+      counterclockwise.players[counterclockwise.currentPlayerIndex]!.id,
+    ).toBe("p4");
+  });
+
+  it("rejects gameplay actions from finished spectators", () => {
+    const state = makeTestState({
+      rules: { ...DEFAULT_GAME_RULES, finishMode: "rank-all" },
+      currentPlayerIndex: 1,
+      finishOrder: ["p1"],
+    });
+
+    expect(() =>
+      applyAction(state, action("p1", { type: "draw" })),
+    ).toThrowError(expect.objectContaining({ code: "invalid-action" }));
+  });
+});
+
 describe("drawing a playable card", () => {
   it("lets the player lead with the drawn card and stack compatible cards", () => {
     const matching = card("red", "number", 5);

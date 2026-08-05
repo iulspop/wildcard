@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS room_metadata (
   persistent INTEGER NOT NULL,
   invite_hash TEXT,
   created_at INTEGER NOT NULL,
-  version INTEGER NOT NULL DEFAULT 0
+  version INTEGER NOT NULL DEFAULT 0,
+  settings_json TEXT NOT NULL DEFAULT '{"finishMode":"first-out"}'
 );
 CREATE TABLE IF NOT EXISTS seats (
   player_id TEXT PRIMARY KEY,
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS processed_actions (
 CREATE TABLE IF NOT EXISTS completed_matches (
   id TEXT PRIMARY KEY,
   winner_player_id TEXT NOT NULL,
+  placements_json TEXT NOT NULL DEFAULT '[]',
   completed_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS standings (
@@ -39,6 +41,8 @@ CREATE TABLE IF NOT EXISTS standings (
   games INTEGER NOT NULL DEFAULT 0,
   wins INTEGER NOT NULL DEFAULT 0,
   losses INTEGER NOT NULL DEFAULT 0,
+  total_placement INTEGER NOT NULL DEFAULT 0,
+  best_placement INTEGER,
   updated_at INTEGER NOT NULL
 );
 `;

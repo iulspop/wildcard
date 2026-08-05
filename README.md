@@ -35,6 +35,15 @@ pnpm exec wrangler secret put SESSION_SECRET
 pnpm exec wrangler secret put SESSION_SECRET --env preview
 ```
 
+## Match finish modes
+
+The room host chooses the finish mode in the lobby before a match starts. The setting is persisted with the room, synchronized to every player, and locked while a game snapshot exists.
+
+- **First player out** preserves the original behavior: the match ends when the first player empties their hand.
+- **Rank every player** records finishers in order. Finished players remain connected as spectators in their fixed seats, active turns skip them, and the final active player is placed automatically.
+
+Wildcard uses one lifetime standings table for both modes. First place counts as a win and every other placement counts as a loss; best and average finish provide the placement detail for rank-all games. Using **Stop game** records no result.
+
 ## Commands
 
 ```sh

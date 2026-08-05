@@ -70,6 +70,7 @@ let sessionUser = null,
   previousTurn = null,
   previousWinner = null,
   previousUnoClaimId = null,
+  previousFinishCount = 0,
   pendingUnoClaimId = null,
   pendingKickPlayerId = null,
   pendingDeleteRoom = null,
@@ -267,6 +268,11 @@ function cardLabel(card) {
 function cardGroup(card) {
   return card.kind === "number" ? `number:${card.value}` : card.kind;
 }
+function ordinal(value) {
+  const remainder = value % 100;
+  if (remainder >= 11 && remainder <= 13) return `${value}th`;
+  return `${value}${value % 10 === 1 ? "st" : value % 10 === 2 ? "nd" : value % 10 === 3 ? "rd" : "th"}`;
+}
 function render() {
   if (!state) return;
   const mySeat = state.seats.find(
@@ -279,6 +285,19 @@ function render() {
         `<li class="seat"><span><span class="dot ${seat.connected ? "online" : ""}"></span>${escapeHTML(seat.displayName)}</span><span class="seat-actions">${seat.playerId === credentials?.playerId ? "You" : `Seat ${seat.seatIndex + 1}${isHost && !state.game ? ` <button class="kick-button" type="button" data-player-id="${escapeHTML(seat.playerId)}" data-player-name="${escapeHTML(seat.displayName)}" aria-label="Remove ${escapeHTML(seat.displayName)} from room">Remove</button>` : ""}`}</span></li>`,
     )
     .join("");
+  const finishMode = state.settings?.finishMode || "first-out";
+  const finishModeControl = $("#finish-mode");
+  finishModeControl.value = finishMode;
+  finishModeControl.disabled = !isHost || !!state.game;
+  $("#finish-mode-description").textContent =
+    finishMode === "rank-all"
+      ? "Players finish in order and remain at the table as spectators until everyone is ranked."
+      : "The match ends as soon as one player empties their hand.";
+  $("#finish-mode-access").textContent = state.game
+    ? "This setting is locked for the current match."
+    : isHost
+      ? "Only you can change this room setting."
+      : "Only the room host can change this setting.";
   $("#start").disabled = !isHost || state.seats.length < 2 || !!state.game;
   $("#end-game").classList.toggle(
     "hidden",
@@ -291,13 +310,14 @@ function render() {
     chosenColor = null;
     previousTurn = null;
     previousWinner = null;
+    previousFinishCount = 0;
   }
   const standings = state.standings || [];
   $("#standings-panel").classList.toggle("hidden", !standings.length);
   $("#standings").innerHTML = standings
     .map(
       (standing) =>
-        `<tr><td>${escapeHTML(standing.displayName)}</td><td>${standing.wins}</td><td>${standing.losses}</td><td>${standing.games}</td><td>${standing.losses ? (standing.wins / standing.losses).toFixed(2) : standing.wins ? "Undefeated" : "—"}</td></tr>`,
+        `<tr><td>${escapeHTML(standing.displayName)}</td><td>${standing.wins}</td><td>${standing.losses}</td><td>${standing.games}</td><td>${standing.losses ? (standing.wins / standing.losses).toFixed(2) : standing.wins ? "Undefeated" : "—"}</td><td>${standing.bestPlacement ? ordinal(standing.bestPlacement) : "—"}</td><td>${standing.averagePlacement === null ? "—" : standing.averagePlacement.toFixed(2)}</td></tr>`,
     )
     .join("");
   if (state.game) renderGame(state.game);
@@ -368,15 +388,42 @@ function renderGame(game) {
     game.currentPlayerId === credentials.playerId
   )
     playSound("turn");
+  if (game.finishOrder.length > previousFinishCount) {
+    const latestId = game.finishOrder.at(-1);
+    const latest = game.players.find((player) => player.id === latestId);
+    if (latest)
+      message(`${latest.name} finished ${ordinal(game.finishOrder.length)}.`);
+  }
   if (!previousWinner && game.winnerId)
     playSound(game.winnerId === credentials.playerId ? "win" : "lose");
   previousTurn = game.currentPlayerId;
   previousWinner = game.winnerId;
+  previousFinishCount = game.finishOrder.length;
+  const meFinished = me?.placement !== null && me?.placement !== undefined;
   $("#turn").textContent = winner
-    ? `${winner.name} wins!`
-    : current?.id === credentials.playerId
-      ? "YOUR TURN — PLAY NOW"
-      : `${current?.name}'s turn`;
+    ? game.finishMode === "rank-all"
+      ? "Final results"
+      : `${winner.name} wins!`
+    : meFinished
+      ? `You finished ${ordinal(me.placement)} — spectating`
+      : current?.id === credentials.playerId
+        ? "YOUR TURN — PLAY NOW"
+        : `${current?.name}'s turn`;
+  const finishProgress = $("#finish-progress");
+  finishProgress.classList.toggle(
+    "hidden",
+    game.finishMode !== "rank-all" || game.finishOrder.length === 0,
+  );
+  finishProgress.innerHTML = game.finishOrder.length
+    ? game.finishOrder
+        .map((playerId, index) => {
+          const player = game.players.find(
+            (candidate) => candidate.id === playerId,
+          );
+          return `<span><strong>${ordinal(index + 1)}</strong> ${escapeHTML(player?.name || "Player")}</span>`;
+        })
+        .join("")
+    : "";
   $("#direction").textContent =
     game.direction === 1 ? "Clockwise ↻" : "Counter-clockwise ↺";
   $("#pending").textContent = game.pendingDraw
@@ -394,13 +441,14 @@ function renderGame(game) {
         const rotation = (index - (visibleCardCount - 1) / 2) * 2;
         return `<span class="mini-card" style="--card-offset:${offset}px;--card-rotation:${rotation}deg" aria-hidden="true"><span>W</span></span>`;
       }).join("");
-      return `<div class="opponent ${p.id === game.currentPlayerId ? "active" : ""}">
+      const finished = p.placement !== null;
+      return `<div class="opponent ${p.id === game.currentPlayerId ? "active" : ""} ${finished ? "finished" : ""}">
         <div class="opponent-cards">${cardBacks}</div>
         <div class="opponent-info">
           <strong>${escapeHTML(p.name)}</strong>
-          <span>${p.cardCount} ${p.cardCount === 1 ? "card" : "cards"}</span>
+          <span>${finished ? `${ordinal(p.placement)} · spectating` : `${p.cardCount} ${p.cardCount === 1 ? "card" : "cards"}`}</span>
         </div>
-        ${p.id === game.currentPlayerId ? '<span class="playing-badge">Playing</span>' : ""}
+        ${finished ? `<span class="placement-badge">${ordinal(p.placement)}</span>` : p.id === game.currentPlayerId ? '<span class="playing-badge">Playing</span>' : ""}
       </div>`;
     })
     .join("");
@@ -427,9 +475,16 @@ function renderGame(game) {
     ? `${lastPlayer?.name || "A player"} · ${groupedCards.length}-card play`
     : "";
   $("#draw-count").textContent = `${game.drawPileCount} cards`;
-  $("#hand-count").textContent = `${me?.cardCount || 0} cards`;
+  $("#hand-count").textContent = meFinished
+    ? `${ordinal(me.placement)} place`
+    : `${me?.cardCount || 0} cards`;
+  const localPlacement = $("#local-placement");
+  localPlacement.classList.toggle("hidden", !meFinished);
+  localPlacement.textContent = meFinished
+    ? `You finished ${ordinal(me.placement)} and are now spectating. Your seat stays fixed while the match continues.`
+    : "";
   const hand = me?.hand || [],
-    isMyTurn = game.currentPlayerId === credentials.playerId,
+    isMyTurn = game.currentPlayerId === credentials.playerId && !meFinished,
     playableCardIds = new Set(game.playableCardIds || []),
     cardsById = new Map(hand.map((card) => [card.id, card]));
   $("#game").classList.toggle("my-turn", isMyTurn);
@@ -498,6 +553,11 @@ async function start() {
   unlockAudio();
   send("start");
   playSound("start");
+}
+function updateFinishMode(event) {
+  send("update-settings", {
+    settings: { finishMode: event.currentTarget.value },
+  });
 }
 async function returnToLobby() {
   send("lobby");
@@ -717,6 +777,7 @@ bind("#logout", "click", async () => {
   message("Signed out.");
 });
 bind("#start", "click", start);
+bind("#finish-mode", "change", updateFinishMode);
 bind("#restart", "click", start);
 bind("#return-lobby", "click", returnToLobby);
 bind("#end-game", "click", endGame);
