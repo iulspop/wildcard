@@ -276,13 +276,10 @@ function applyPlay(
   }
 
   const player = state.players[state.currentPlayerIndex]!;
-  if (
-    state.drawnCardId !== null &&
-    (action.cardIds.length !== 1 || action.cardIds[0] !== state.drawnCardId)
-  ) {
+  if (state.drawnCardId !== null && action.cardIds[0] !== state.drawnCardId) {
     throw new GameRuleError(
       "illegal-play",
-      "Only the card drawn this turn may be played",
+      "A grouped play after drawing must start with the card drawn this turn",
     );
   }
   const cards = action.cardIds.map((cardId) => {

@@ -251,9 +251,17 @@ describe("actions and turn order", () => {
 });
 
 describe("drawing a playable card", () => {
-  it("lets the player play only the card they just drew", () => {
+  it("lets the player lead with the drawn card and stack compatible cards", () => {
+    const matching = card("red", "number", 5);
+    const remaining = card("green", "number", 8);
     const drawn = card("blue", "number", 5);
-    const state = makeTestState({ drawPile: [drawn] });
+    const state = makeTestState({
+      players: [
+        { id: "p1", name: "One", hand: [matching, remaining] },
+        { id: "p2", name: "Two", hand: [card("green", "number", 2)] },
+      ],
+      drawPile: [drawn],
+    });
 
     const afterDraw = applyAction(state, action("p1", { type: "draw" }), {
       shuffle: identityShuffle,
@@ -262,14 +270,44 @@ describe("drawing a playable card", () => {
     expect(afterDraw.currentPlayerIndex).toBe(0);
     expect(afterDraw.drawnCardId).toBe(drawn.id);
     expect(canPlayCard(afterDraw, drawn)).toBe(true);
-    expect(canPlayCard(afterDraw, afterDraw.players[0]!.hand[0]!)).toBe(false);
+    expect(canPlayCard(afterDraw, matching)).toBe(false);
 
     const afterPlay = applyAction(
       afterDraw,
-      action("p1", { type: "play", cardIds: [drawn.id] }),
+      action("p1", {
+        type: "play",
+        cardIds: [drawn.id, matching.id],
+      }),
     ).state;
     expect(afterPlay.currentPlayerIndex).toBe(1);
     expect(afterPlay.drawnCardId).toBeNull();
+    expect(afterPlay.lastPlay?.cards).toEqual([drawn, matching]);
+  });
+
+  it("rejects grouped plays that do not start with the drawn card", () => {
+    const matching = card("red", "number", 5);
+    const drawn = card("blue", "number", 5);
+    const afterDraw = applyAction(
+      makeTestState({
+        players: [
+          { id: "p1", name: "One", hand: [matching] },
+          { id: "p2", name: "Two", hand: [card("green", "number", 2)] },
+        ],
+        drawPile: [drawn],
+      }),
+      action("p1", { type: "draw" }),
+      { shuffle: identityShuffle },
+    ).state;
+
+    expect(() =>
+      applyAction(
+        afterDraw,
+        action("p1", {
+          type: "play",
+          cardIds: [matching.id, drawn.id],
+        }),
+      ),
+    ).toThrowError("must start with the card drawn this turn");
   });
 
   it("lets the player keep a playable drawn card and end their turn", () => {
