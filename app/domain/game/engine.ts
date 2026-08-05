@@ -19,6 +19,7 @@ export interface CreateGameOptions {
   rules?: GameRules;
   deck?: Card[];
   shuffle?: Shuffle;
+  playerShuffle?: (players: readonly PlayerSeed[]) => PlayerSeed[];
 }
 
 export interface ApplyActionOptions {
@@ -27,11 +28,28 @@ export interface ApplyActionOptions {
   generateClaimId?: () => string;
 }
 
+export function randomPlayerShuffle(
+  random: () => number = Math.random,
+): (players: readonly PlayerSeed[]) => PlayerSeed[] {
+  return (players) => {
+    const shuffled = [...players];
+    for (let index = shuffled.length - 1; index > 0; index--) {
+      const target = Math.floor(random() * (index + 1));
+      [shuffled[index], shuffled[target]] = [
+        shuffled[target]!,
+        shuffled[index]!,
+      ];
+    }
+    return shuffled;
+  };
+}
+
 export function createGame({
   players,
   rules = DEFAULT_GAME_RULES,
   deck = createStandardDeck(),
   shuffle = randomShuffle(),
+  playerShuffle = randomPlayerShuffle(),
 }: CreateGameOptions): GameState {
   const normalizedRules = normalizeRules(rules);
   validateRules(normalizedRules);
@@ -39,7 +57,7 @@ export function createGame({
   validateDeck(deck, players.length * normalizedRules.initialHandSize + 1);
 
   const drawPile = shuffle(deck.map((card) => ({ ...card })));
-  const gamePlayers = players.map((player) => ({
+  const gamePlayers = playerShuffle(players).map((player) => ({
     ...player,
     hand: [] as Card[],
   }));

@@ -349,6 +349,15 @@ function renderUno(game) {
   }
 }
 
+function opponentsInUpcomingTurnOrder(game) {
+  const playersById = new Map(
+    game.players.map((player) => [player.id, player]),
+  );
+  return (game.upcomingPlayerIds || [])
+    .map((playerId) => playersById.get(playerId))
+    .filter(Boolean);
+}
+
 function renderGame(game) {
   const me = game.players.find((p) => p.id === credentials.playerId),
     current = game.players.find((p) => p.id === game.currentPlayerId),
@@ -377,8 +386,7 @@ function renderGame(game) {
   activeColor.className = `active-color ${game.activeColor}`;
   activeColor.innerHTML = `<span class="active-color-swatch" aria-hidden="true"></span>Current color: ${escapeHTML(game.activeColor)}`;
   renderUno(game);
-  $("#opponents").innerHTML = game.players
-    .filter((p) => p.id !== credentials.playerId)
+  $("#opponents").innerHTML = opponentsInUpcomingTurnOrder(game)
     .map((p) => {
       const visibleCardCount = Math.min(p.cardCount, 10);
       const cardBacks = Array.from({ length: visibleCardCount }, (_, index) => {

@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 
+import { card, makeTestState } from "./test-helpers.ts";
 import { projectGame } from "./view.ts";
-import { makeTestState } from "./test-helpers.ts";
 
 it("only exposes the viewing player's hand", () => {
   const state = makeTestState();
@@ -15,6 +15,31 @@ it("only exposes the viewing player's hand", () => {
   expect(JSON.stringify(view)).not.toContain(
     `"id":"${state.players[1]!.hand[0]!.id}"`,
   );
+});
+
+it("projects opponents in left-to-right upcoming turn order", () => {
+  const state = makeTestState({
+    players: [
+      { id: "p1", name: "One", hand: [card("red", "number", 1)] },
+      { id: "p2", name: "Two", hand: [card("red", "number", 2)] },
+      { id: "p3", name: "Three", hand: [card("red", "number", 3)] },
+      { id: "p4", name: "Four", hand: [card("red", "number", 4)] },
+    ],
+    currentPlayerIndex: 1,
+    direction: 1,
+  });
+
+  expect(projectGame(state, "p1").upcomingPlayerIds).toEqual([
+    "p2",
+    "p3",
+    "p4",
+  ]);
+  state.direction = -1;
+  expect(projectGame(state, "p1").upcomingPlayerIds).toEqual([
+    "p2",
+    "p4",
+    "p3",
+  ]);
 });
 
 it("projects the public cards from the most recent play", () => {

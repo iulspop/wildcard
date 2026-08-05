@@ -1,5 +1,9 @@
 import { randomShuffle } from "../domain/game/deck.ts";
-import { applyAction, createGame } from "../domain/game/engine.ts";
+import {
+  applyAction,
+  createGame,
+  randomPlayerShuffle,
+} from "../domain/game/engine.ts";
 import { normalizeRules } from "../domain/game/rules.ts";
 import { GameRuleError, type GameState } from "../domain/game/types.ts";
 import { projectGame } from "../domain/game/view.ts";
@@ -524,6 +528,7 @@ export class GameRoom implements DurableObject {
       })),
       rules,
       shuffle: randomShuffle(secureRandom),
+      playerShuffle: randomPlayerShuffle(secureRandom),
     });
     this.persistGame(stored.game);
     this.bumpVersion(stored);

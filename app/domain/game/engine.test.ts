@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { createStandardDeck, identityShuffle } from "./deck.ts";
-import { applyAction, canPlayCard, createGame } from "./engine.ts";
+import {
+  applyAction,
+  canPlayCard,
+  createGame,
+  randomPlayerShuffle,
+} from "./engine.ts";
 import { DEFAULT_GAME_RULES } from "./rules.ts";
 import { card, makeTestState } from "./test-helpers.ts";
 import {
@@ -44,6 +49,33 @@ describe("createGame", () => {
     expect(state.discardPile[0]).toMatchObject({ kind: "number" });
     expect(state.discardPile[0]!.color).not.toBe("wild");
     expect(state.drawPile).toHaveLength(93);
+  });
+
+  it("randomizes player order before dealing", () => {
+    const players = [
+      { id: "p1", name: "One" },
+      { id: "p2", name: "Two" },
+      { id: "p3", name: "Three" },
+      { id: "p4", name: "Four" },
+    ];
+    const state = createGame({
+      players,
+      shuffle: identityShuffle,
+      playerShuffle: randomPlayerShuffle(() => 0),
+    });
+
+    expect(state.players.map((player) => player.id)).toEqual([
+      "p2",
+      "p3",
+      "p4",
+      "p1",
+    ]);
+    expect(players.map((player) => player.id)).toEqual([
+      "p1",
+      "p2",
+      "p3",
+      "p4",
+    ]);
   });
 
   it("accepts 2–8 players and rejects counts outside the configured range", () => {
